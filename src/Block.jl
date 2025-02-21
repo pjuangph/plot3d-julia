@@ -22,12 +22,16 @@ export Block, ReadMultiBlock, WriteMultiBlock
     Returns
         Array 3 dimensions for either X,Y, or Z
     """
-function ReadPlot3DChunkBinary(f::IO,IMAX::Int64,JMAX::Int64,KMAX::Int64)::Array{Float64,3}
+function ReadPlot3DChunkBinary(f::IO,IMAX::Int64,JMAX::Int64,KMAX::Int64;double_precision::Bool=false)::Array{Float64,3}
     A = Array{Float64,3}(undef,IMAX,JMAX,KMAX)
     for k in 1:KMAX
         for j in 1:JMAX
             for i in 1:IMAX
-                A[i,j,k] = Float64(read(f,Float32))
+                if double_precision
+                    A[i,j,k] = Float64(read(f,Float64))
+                else
+                    A[i,j,k] = Float64(read(f,Float32))
+                end
             end
         end
     end
@@ -59,53 +63,65 @@ end
         filename (string): Name of file to read
         binary (Bool): read binary file or ascii
 """
-function ReadMultiBlock(filename::String;binary::Bool=false)
+function ReadMultiBlock(filename::String;binary::Bool=false,double_precision::Bool=false)::Vector{Block}
     blocks = Block[]
     if isfile(filename)
         if binary
-            io = open(filename,"r")
-            NBLOCKS = Int64(read(io,Int32))
-            IMAX = Int64[NBLOCKS]; JMAX = Int64[NBLOCKS]; KMAX = Int64[NBLOCKS]
-            for i in 1:NBLOCKS
-                IMAX[i] = Int64(read(io,Int32))
-                JMAX[i] = Int64(read(io,Int32))
-                KMAX[i] = Int64(read(io,Int32))
+            open(filename,"r") do io
+                if double_precision
+                    NBLOCKS = Int64(read(io,Int64))            
+                    IMAX = Int64[NBLOCKS]; JMAX = Int64[NBLOCKS]; KMAX = Int64[NBLOCKS]
+                    for i in 1:NBLOCKS
+                        IMAX[i] = Int64(read(io,Int64))
+                        JMAX[i] = Int64(read(io,Int64))
+                        KMAX[i] = Int64(read(io,Int64))
+                    end
+                else
+                    NBLOCKS = Int64(read(io,Int32))            
+                    IMAX = Int64[NBLOCKS]; JMAX = Int64[NBLOCKS]; KMAX = Int64[NBLOCKS]
+                    for i in 1:NBLOCKS
+                        IMAX[i] = Int64(read(io,Int32))
+                        JMAX[i] = Int64(read(io,Int32))
+                        KMAX[i] = Int64(read(io,Int32))
+                    end
+                end
+
+                for i in 1:NBLOCKS
+                    X = ReadPlot3DChunkBinary(io,IMAX[i],JMAX[i],KMAX[i],double_precision=double_precision)
+                    Y = ReadPlot3DChunkBinary(io,IMAX[i],JMAX[i],KMAX[i],double_precision=double_precision)
+                    Z = ReadPlot3DChunkBinary(io,IMAX[i],JMAX[i],KMAX[i],double_precision=double_precision)
+                    b = Block(IMAX=IMAX[i],JMAX=JMAX[i],KMAX=KMAX[i],X=X,Y=Y,Z=Z)
+                    push!(blocks,b)
+                end
             end
-            for i in 1:NBLOCKS
-                X = ReadPlot3DChunkBinary(io,IMAX[i],JMAX[i],KMAX[i])
-                Y = ReadPlot3DChunkBinary(io,IMAX[i],JMAX[i],KMAX[i])
-                Z = ReadPlot3DChunkBinary(io,IMAX[i],JMAX[i],KMAX[i])
-                b = Block(IMAX=IMAX[i],JMAX=JMAX[i],KMAX=KMAX[i],X=X,Y=Y,Z=Z)
-                push!(blocks,b)
-            end
-            close(io)
         else
-            io = open(filename,"r")
-            NBLOCKS = parse(Int64,readline(io))
-            IMAX = Array{Int64,1}(undef,NBLOCKS); JMAX = Array{Int64,1}(undef,NBLOCKS); KMAX = Array{Int64,1}(undef,NBLOCKS)
-            for i in 1:NBLOCKS
-                line = strip(readline(io))
-                a,b,c = split(line," ")
-                IMAX[i] = parse(Int64,a)
-                JMAX[i] = parse(Int64,b)
-                KMAX[i] = parse(Int64,c)
+            open(filename,"r") do io
+                NBLOCKS = parse(Int64,readline(io))
+                IMAX = Array{Int64,1}(undef,NBLOCKS); JMAX = Array{Int64,1}(undef,NBLOCKS); KMAX = Array{Int64,1}(undef,NBLOCKS)
+                for i in 1:NBLOCKS
+                    line = strip(readline(io))
+                    a,b,c = split(line," ")
+                    IMAX[i] = parse(Int64,a)
+                    JMAX[i] = parse(Int64,b)
+                    KMAX[i] = parse(Int64,c)
+                end
+                for i in 1:NBLOCKS
+                    X = ReadPlot3DChunkASCII(io,IMAX[i],JMAX[i],KMAX[i])
+                    Y = ReadPlot3DChunkASCII(io,IMAX[i],JMAX[i],KMAX[i])
+                    Z = ReadPlot3DChunkASCII(io,IMAX[i],JMAX[i],KMAX[i])
+                    b = Block(IMAX=IMAX[i],JMAX=JMAX[i],KMAX=KMAX[i],X=X,Y=Y,Z=Z)
+                    push!(blocks,b)
+                end
             end
-            for i in 1:NBLOCKS
-                X = ReadPlot3DChunkASCII(io,IMAX[i],JMAX[i],KMAX[i])
-                Y = ReadPlot3DChunkASCII(io,IMAX[i],JMAX[i],KMAX[i])
-                Z = ReadPlot3DChunkASCII(io,IMAX[i],JMAX[i],KMAX[i])
-                b = Block(IMAX=IMAX[i],JMAX=JMAX[i],KMAX=KMAX[i],X=X,Y=Y,Z=Z)
-                push!(blocks,b)
-            end
-            close(io)
         end
     end
+    println("Read ",length(blocks)," blocks")
     return blocks
 end
 
 ## End Blocks
 
-function WritePlot3DBlockBinary(f::IO,B::Block,double_precision::Bool=true)
+function WritePlot3DBlockBinary(f::IO,B::Block;double_precision::Bool=false)
     """Write binary plot3D block which contains X,Y,Z
         default format is Big-Endian
 
@@ -118,10 +134,10 @@ function WritePlot3DBlockBinary(f::IO,B::Block,double_precision::Bool=true)
         for k in 1:B.KMAX
             for j in 1:B.JMAX
                 for i in 1:B.IMAX
-                    if !double_precision
-                        write(f,Float32(V[i,j,k]))
-                    else
+                    if double_precision
                         write(f,Float64(V[i,j,k]))
+                    else
+                        write(f,Float32(V[i,j,k]))
                     end
                 end
             end
@@ -167,7 +183,7 @@ function WritePlot3DBlockASCII(f,B::Block,columns::Int=6)
 end
 
 
-function WriteMultiBlock(filename::String,blocks::Array{Block,1},binary::Bool=true,double_precision::Bool=true)
+function WriteMultiBlock(filename::String,blocks::Vector{Block};binary::Bool=true,double_precision::Bool=false)
     """Writes blocks to a Plot3D file
 
     Args:
@@ -177,28 +193,37 @@ function WriteMultiBlock(filename::String,blocks::Array{Block,1},binary::Bool=tr
         double_precision (bool, optional). Writes to binary file using double precision. Defaults to True
     """
     if binary
-        f = open(filename,'w')
-        write(f,Int32(length(blocks)))
-        for b in blocks
-            IMAX,JMAX,KMAX = b.X.shape
-            write(f,Int32(IMAX))
-            write(f,Int32(JMAX))
-            write(f,Int32(KMAX))
+        open(filename,"w") do f
+            write(f,Int32(length(blocks)))
+            for b in blocks
+                IMAX,JMAX,KMAX = size(b.X)
+                if double_precision
+                    write(f,Int64(IMAX))
+                    write(f,Int64(JMAX))
+                    write(f,Int64(KMAX))
+                else
+                    write(f,Int32(IMAX))
+                    write(f,Int32(JMAX))
+                    write(f,Int32(KMAX))
+                end
+            end
+            for b in blocks
+                WritePlot3DBlockBinary(f,b,double_precision=double_precision)
+            end
         end
-        for b in blocks
-            WritePlot3DBlockBinary(f,b,double_precision)
-        end
-        close(f)
+        print( "Wrote ",length(blocks)," blocks to ",filename)
     else # ascii 
-        f = open(filename,'w')
-        @printf(f,"%d\n",length(blocks))
+        open(filename,"w") do f
+            @printf(f,"%d\n",length(blocks))
 
-        for b in blocks
-            IMAX,JMAX,KMAX = shape(b.X)
-            @printf(f,"%d %d %d\n",IMAX,JMAX,KMAX)
+            for b in blocks
+                IMAX,JMAX,KMAX = size(b.X)
+                @printf(f,"%d %d %d\n",IMAX,JMAX,KMAX)
+            end
+            for b in blocks
+                WritePlot3DBlockASCII(f,b)
+            end
         end
-        for b in blocks
-            WritePlot3DBlockASCII(f,b)
-        end
+        print( "Wrote ",length(blocks)," blocks to ",filename)
     end
 end
