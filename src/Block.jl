@@ -68,25 +68,29 @@ function ReadMultiBlock(filename::String;binary::Bool=false,double_precision::Bo
     if isfile(filename)
         if binary
             open(filename,"r") do io
+                println("Reading binary file ",filename)
                 if double_precision
                     NBLOCKS = Int64(read(io,Int64))            
                     IMAX = Int64[NBLOCKS]; JMAX = Int64[NBLOCKS]; KMAX = Int64[NBLOCKS]
                     for i in 1:NBLOCKS
                         IMAX[i] = Int64(read(io,Int64))
                         JMAX[i] = Int64(read(io,Int64))
-                        KMAX[i] = Int64(read(io,Int64))
+                        KMAX[i] = Int64(read(io,Int64))                        
                     end
                 else
                     NBLOCKS = Int64(read(io,Int32))            
-                    IMAX = Int64[NBLOCKS]; JMAX = Int64[NBLOCKS]; KMAX = Int64[NBLOCKS]
+                    println("Reading ",NBLOCKS," blocks")
+                    IMAX = Vector{Int64}(undef, NBLOCKS); JMAX = Vector{Int64}(undef, NBLOCKS); KMAX = Vector{Int64}(undef, NBLOCKS)
                     for i in 1:NBLOCKS
                         IMAX[i] = Int64(read(io,Int32))
                         JMAX[i] = Int64(read(io,Int32))
                         KMAX[i] = Int64(read(io,Int32))
+                        println("Done Reading blocks ",i," IMAX=",IMAX[i]," JMAX=",JMAX[i]," KMAX=",KMAX[i])
                     end
                 end
 
                 for i in 1:NBLOCKS
+                    println("Reading the chunks")
                     X = ReadPlot3DChunkBinary(io,IMAX[i],JMAX[i],KMAX[i],double_precision=double_precision)
                     Y = ReadPlot3DChunkBinary(io,IMAX[i],JMAX[i],KMAX[i],double_precision=double_precision)
                     Z = ReadPlot3DChunkBinary(io,IMAX[i],JMAX[i],KMAX[i],double_precision=double_precision)

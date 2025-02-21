@@ -24,7 +24,7 @@ end
     end
     blocks = ReadMultiBlock("test_files/VSPT_ASCII.xyz",binary=false)
     WriteMultiBlock("test_files/VSPT_Binary.xyz",blocks,binary=true,double_precision=false)
-    blocks_written = ReadMultiBlock("test_files/VSPT_Binary.xyz",binary=true)
+    blocks_written = ReadMultiBlock("test_files/VSPT_Binary.xyz",binary=true,double_precision=false)
     if (size(blocks_written[1].X)[1] == size(blocks[1].X)[1] && size(blocks_written[1].X)[2] == size(blocks[1].X)[2] && size(blocks_written[1].X)[3] == size(blocks[1].X)[3]) && 
         (size(blocks_written[2].X)[1] == size(blocks[2].X)[1] && size(blocks_written[2].X)[2] == size(blocks[2].X)[2] && size(blocks_written[2].X)[3] == size(blocks[2].X)[3])
         @test true
