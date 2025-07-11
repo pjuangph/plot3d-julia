@@ -1,0 +1,65 @@
+Checking faces of block 1:
+  Face 1:
+    Matches with face 3 of block 4
+  Face 2:
+    Matches with face 3 of block 2
+  Face 3:
+    No match found for this face.
+  Face 4:
+    No match found for this face.
+  Face 5:
+    Matches with face 3 of block 4
+  Face 6:
+    Matches with face 3 of block 2
+Checking faces of block 2:
+  Face 1:
+    No match found for this face.
+  Face 2:
+    No match found for this face.
+  Face 3:
+    Matches with face 2 of block 1
+  Face 4:
+    Matches with face 3 of block 3
+  Face 5:
+    No match found for this face.
+  Face 6:
+    No match found for this face.
+Checking faces of block 3:
+  Face 1:
+    Matches with face 1 of block 5
+  Face 2:
+    No match found for this face.
+  Face 3:
+    Matches with face 4 of block 2
+  Face 4:
+    No match found for this face.
+  Face 5:
+    Matches with face 1 of block 5
+  Face 6:
+    No match found for this face.
+Checking faces of block 4:
+  Face 1:
+    No match found for this face.
+  Face 2:
+    No match found for this face.
+  Face 3:
+    Matches with face 1 of block 1
+  Face 4:
+    Matches with face 3 of block 5
+  Face 5:
+    No match found for this face.
+  Face 6:
+    No match found for this face.
+Checking faces of block 5:
+  Face 1:
+    Matches with face 1 of block 3
+  Face 2:
+    No match found for this face.
+  Face 3:
+    Matches with face 4 of block 4
+  Face 4:
+    No match found for this face.
+  Face 5:
+    Matches with face 1 of block 3
+  Face 6:
+    No match found for this face.

@@ -1,0 +1,52 @@
+Redo the original copied c grid and see if it is structured
+
+
+5/27 - gmsh 3D mesh is def fucked. Always defaults to 3D. Applies to both
+the square and the C-grid
+Working on matching faces correct (since 
+things that curve make it weird)
+
+5/29 - Don't lose (trying with TDD)
+
+println("  Reverse orientation:")
+    for i in 1:n
+        println("    f1: ", f1.points[i], "  f2: ", f2.points[n-i+1])
+    end
+    reverse_match = all(f1==f2 for i in 1:n)
+    if reverse_match
+        println("  => Match (reverse orientation)")
+        return true
+    end
+    println("  => No match")
+    return false
+
+    Okay 2D definitely works, even with the fix 
+    to put in his Teams code. 3D currently works
+    but since p3d files still don't work, all the 
+    testing I've done uses TDD and I'm not convinced
+    it'll actually work on a script. 
+
+5/30 - Use test file (make_3d_grid.jl) to check 3D via paraview, 
+expand test cases to all functions. Goal: use test abilities
+to add .xyz compatibility to smil_expanded.jl then check
+the whole thing - if it prints out correctly in 3D. The problem
+is that I'm not sure exactly how this xyz format is set up - gmsh
+doesn't export to this so I can't find an example. I think once I 
+have that figured out I can make a function to read it, then a third
+function to choose between .p3d and .xyz 
+
+6/9 - Okay so I can't run Run_File3D because I need a 3D
+file for it to work. So I need to get the .xyz bit working 
+before I can test my actual code. 
+
+Update on .xyz - his code was adding five empty blocks
+to each end so that's where the 10 extra numbers came from.
+He fixed it. 
+
+It works!!!!! On the 3D .xyz file - it gives the matching sizes
+Goal now is doc strings (***) to explain how to use the functions
+and as many tests as possible. I also want to maybe get Paraview working?
+If I don't have anything new by the time I finish that stuff tomorrow I'll
+work on it. 
+
+6/10 - Doc strings added. 

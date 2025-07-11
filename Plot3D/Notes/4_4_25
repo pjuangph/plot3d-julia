@@ -1,0 +1,11 @@
+REMEMBER: Within the p3d files, i index is horizontal
+j index is vertical DOWN
+k index isn't visible
+
+first block is X
+second block is Y
+third block is Z
+
+SO: X[begin, :, end] gives the first i value (i.e. first column)
+then all the vertical j values, going straight down
+at k = 1 (which is everywhere since it's 2D)
