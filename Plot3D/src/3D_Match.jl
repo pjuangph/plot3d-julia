@@ -37,12 +37,12 @@ end
 function forward_match(f1::FaceND, f2::FaceND)
     n = length(f1.points)
     n == length(f2.points) || return false
-    for i in 1:n
-        println(" 1   f1: ", f1.points[i], "  f2: ", f2.points[i])
-    end
+    # for i in 1:n
+    #     println(" 1   f1: ", f1.points[i], "  f2: ", f2.points[i])
+    # end
     forward_match = all(f1.points[i] == f2.points[i] for i in 1:n)
     if forward_match
-        println(" 2 => Match (forward orientation)")
+        # println(" 2 => Match (forward orientation)")
         return true
     end  
     return false
@@ -55,12 +55,12 @@ end
 function reverse_match(f1::FaceND, f2::FaceND)
     n = length(f1.points)
     n == length(f2.points) || return false
-    for i in 1:n
-        println(" 3   f1: ", f1.points[i], "  f2: ", f2.points[n-i+1])
-    end
+    # for i in 1:n
+    #     println(" 3   f1: ", f1.points[i], "  f2: ", f2.points[n-i+1])
+    # end
     reverse_match = all(f1.points[i] == f2.points[n-i+1] for i in 1:n)
     if reverse_match
-        println(" 4 => Match (reverse orientation)")
+        # println(" 4 => Match (reverse orientation)")
         return true
     end  
     return false
@@ -72,10 +72,10 @@ end
 """
 function final_match_check(f1::FaceND, f2::FaceND)
     if forward_match(f1, f2)
-        println("Matches (forward) => ", f1.x1, " to ", f2.x1, " and ", f1.x2, " to ", f2.x2)
+        #println("Matches (forward) => ", f1.x1, " to ", f2.x1, " and ", f1.x2, " to ", f2.x2)
         return true
     elseif reverse_match(f1, f2)
-        println("Matches (reverse) => ", f1.x1, " to ", f2.x2, " and ", f1.x2, " to ", f2.x1)
+        #println("Matches (reverse) => ", f1.x1, " to ", f2.x2, " and ", f1.x2, " to ", f2.x1)
         return true
     else
         # println(" => No match")
