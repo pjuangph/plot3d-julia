@@ -4,27 +4,36 @@ export Block2D, Block3D, read_blocks
 
 abstract type AbstractBlock end
 
+"""
+    Block2D{T, AA<:AbstractArray{T,2}}
+
+A 2D Plot3D block holding coordinate arrays `X` and `Y`.
+"""
+struct Block2D{T,AA<:AbstractArray{T,2}} <: AbstractBlock
+  X::AA
+  Y::AA
+end
+
+"""
+    Block3D{T, AA<:AbstractArray{T,3}}
+
+A 3D Plot3D block holding coordinate arrays `X`, `Y`, and `Z`.
+"""
 struct Block3D{T,AA<:AbstractArray{T,3}} <: AbstractBlock
   X::AA
   Y::AA
   Z::AA
 end
 
-struct Block2D{T,AA<:AbstractArray{T,2}} <: AbstractBlock
-  X::AA
-  Y::AA
-end
-
 Base.size(b::AbstractBlock) = size(b.X)
 
 """
-    read_block(starting_line::Int, block_dims::NTuple{N,Int}, data::Vector{String})
+    read_block(starting_line::Int, block_dims::NTuple{3,Int}, data::Vector{String}; T=Float64)
 
-Read the coordinates of a single block from the data vector. The `starting_line` is the line
-that the coordinates for this block start. The `data` vector is the raw string read from the file.
+Read the coordinates of a single 3D block from the data vector. Returns a `Block3D`.
 """
 function read_block(
-  starting_line::Int, block_dims::NTuple{3,Int}, data::Vector{String}, T=Float64
+  starting_line::Int, block_dims::NTuple{3,Int}, data::Vector{String}; T=Float64
 )
   x = zeros(T, block_dims)
   y = zeros(T, block_dims)
@@ -61,8 +70,13 @@ function read_block(
   return Block3d(x, y, z)
 end
 
+"""
+    read_block(starting_line::Int, block_dims::NTuple{2,Int}, data::Vector{String}; T=Float64)
+
+Read the coordinates of a single 2D block from the data vector. Returns a `Block2D`.
+"""
 function read_block(
-  starting_line::Int, block_dims::NTuple{2,Int}, data::Vector{String}, T=Float64
+  starting_line::Int, block_dims::NTuple{2,Int}, data::Vector{String}; T=Float64
 )
   x = zeros(T, block_dims)
   y = zeros(T, block_dims)
@@ -87,9 +101,9 @@ function read_block(
 end
 
 """
-    read_blocks(filename)
+    read_blocks(filename::String)
 
-Read all of the blocks from the given Plot3D file
+Read all blocks from a Plot3D file. Returns a vector of `Block2D` or `Block3D` depending on the file contents.
 """
 function read_blocks(filename)
   data = readlines(filename)
@@ -108,6 +122,11 @@ function read_blocks(filename)
   return blocks
 end
 
+"""
+    read_3d_blocks(data::Vector{String})
+
+Parse all 3D blocks from the given Plot3D data vector. Returns a vector of `Block3D`.
+"""
 function read_3d_blocks(data)
   n_blocks = parse(Int, data[1])
   block_dims_str = split.(data[2:(2 + n_blocks - 1)])
@@ -132,6 +151,11 @@ function read_3d_blocks(data)
   return blocks
 end
 
+"""
+    read_2d_blocks(data::Vector{String})
+
+Parse all 2D blocks from the given Plot3D data vector. Returns a vector of `Block2D`.
+"""
 function read_2d_blocks(data)
   n_blocks = parse(Int, data[1])
   block_dims_str = split.(data[2:(2 + n_blocks - 1)])

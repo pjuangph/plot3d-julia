@@ -5,14 +5,14 @@ module Plot3D
     import Base
 
     # Load block structure
-    include(joinpath(@__DIR__, "smilBlocks.jl"))
+    include("Block.jl")
     
     # Load .xyz reader
-    include(joinpath(@__DIR__, "xyz_readin.jl"))
+    include("xyz_Reader.jl")
     using .xyzreader
 
     # Load face-matching utilities
-    include(joinpath(@__DIR__,"3D_Match.jl"))
+    include("Face.jl")
     using .Faces
 
 
