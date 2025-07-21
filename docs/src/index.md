@@ -1,7 +1,7 @@
 # Plot3D.jl
 
-Add in later
-
+A Julia package designed to take .p3d and .xyz files modeling multi-block meshes and output the 
+block connections in the form ((:blk1, :ihi) => (:blk2, :ilo), (:blk1, :ilo) => (:blk2, :ihi)).
 
 ## API Documentation
 
