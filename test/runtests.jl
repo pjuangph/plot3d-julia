@@ -72,3 +72,25 @@ end
     @test b.y[1,1,1] == 11.0
     @test b.z[2,2,2] == 28.0
 end
+
+@testset "Block Connections" begin
+    # Load a simple test mesh with known connections
+    blocks = read_blocks("FewerBlocks.p3d")
+    block_faces = [Plot3D.Faces.Block2DFaces(b) for b in blocks]
+    connections = print_connections(block_faces)
+
+    # Expected connections for the test mesh
+    expected = [
+        ((:blk1, :ihi) => (:blk2, :ilo)),
+        ((:blk1, :ilo) => (:blk2, :ihi)),
+    ]
+
+    # Test that all expected connections are present
+    for conn in expected
+        @test conn in connections
+    end
+
+    # Optionally, test that there are no extra connections
+    @test length(connections) == length(expected)
+end
+
