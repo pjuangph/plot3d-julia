@@ -4,9 +4,9 @@ A Julia package designed to take .p3d and .xyz files modeling multi-block meshes
 block connections in the form ((:blk1, :ihi) => (:blk2, :ilo), (:blk1, :ilo) => (:blk2, :ihi)).
 ## Installation
 
-'''
+
 git clone https://github.com/ReadingRocks2973/plot3d-julia.git
-'''
+
 
 ## Usage
 
