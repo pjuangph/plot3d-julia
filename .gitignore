@@ -7,3 +7,4 @@ data/
 /docs/src/examples
 /build/
 .vscode
+TestingRuns.jl
