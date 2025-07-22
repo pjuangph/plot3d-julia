@@ -74,15 +74,24 @@ end
 end
 
 @testset "Block Connections" begin
-    # Load a simple test mesh with known connections
-    blocks = read_blocks("FewerBlocks.p3d")
+
+    X1 = [0.0 1.0; 0.0 1.0]
+    Y1 = [0.0 0.0; 1.0 1.0]
+    X2 = [1.0 2.0; 1.0 2.0]
+    Y2 = [0.0 0.0; 1.0 1.0]
+
+    # Create Block2D objects
+    b1 = Plot3D.BlockType.Block2D(X1, Y1)
+    b2 = Plot3D.BlockType.Block2D(X2, Y2)
+    blocks = [b1, b2]
+
+    # Generate faces and connections
     block_faces = [Plot3D.Faces.Block2DFaces(b) for b in blocks]
     connections = print_connections(block_faces)
 
-    # Expected connections for the test mesh
+    # Define expected connections
     expected = [
-        ((:blk1, :ihi) => (:blk2, :ilo)),
-        ((:blk1, :ilo) => (:blk2, :ihi)),
+        ((:blk1, :jhi) => (:blk2, :jlo))
     ]
 
     # Test that all expected connections are present

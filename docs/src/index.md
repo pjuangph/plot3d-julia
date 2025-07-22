@@ -3,7 +3,19 @@
 A Julia package designed to take .p3d and .xyz files modeling multi-block meshes and output the 
 block connections in the form ((:blk1, :ihi) => (:blk2, :ilo), (:blk1, :ilo) => (:blk2, :ihi)).
 
-## API Documentation
+## Installation and Usage
+
+```
+git clone https://github.com/ReadingRocks2973/plot3d-julia.git
+```
+
+##### From the Plot3D folder, for just the multiblock connections: 
+
+```
+julia ./test/Run_File3D.jl ./path/to/.xyz/or/.p3d/file
+```
+
+### API Documentation
 
 ```@autodocs
 Modules = [Plot3D]

@@ -6,6 +6,7 @@ module Plot3D
 
     # Load block structure
     include("Block.jl")
+    using .BlockType
     
     # Load .xyz reader
     include("xyz_Reader.jl")
