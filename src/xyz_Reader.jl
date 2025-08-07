@@ -11,12 +11,13 @@ struct Block3DXYZ
     y::Array{Float64,3}
     z::Array{Float64,3}
 end
+
+
 """
     read_xyz_block(start_line::Int, dims::NTuple{3, Int}, lines::Vector{String}) -> Tuple{Block3DXYZ, Int}
 
     Takes expected number of values from lines 2 through NBlocks and checks that actual number of values 
 """
-
 function read_xyz_block(start_line::Int, dims::NTuple{3, Int}, lines::Vector{String})
     ni, nj, nk = dims
     x = zeros(Float64, ni, nj, nk)
