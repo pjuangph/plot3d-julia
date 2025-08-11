@@ -25,7 +25,7 @@ end
 
 # Read mesh file (supports .p3d and .xyz)
 blocks = endswith(meshfile, ".xyz") ?
-    read_structured_xyz(meshfile) :
+    read_plot3D_ascii(meshfile) :
     read_blocks(meshfile)
 
 # Use the correct face extraction for 2D or 3D blocks
