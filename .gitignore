@@ -8,3 +8,5 @@ Manifest.toml
 /build/
 .vscode
 TestingRuns.jl
+.DS_Store
+*.xyzb

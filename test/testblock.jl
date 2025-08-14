@@ -13,8 +13,8 @@ using Downloads
 
     # read ASCII using your package
     blocks = read_plot3D_ascii(ascii_path)
-    @test !isempty(blocks)
-
+    @test length(blocks) == 2
+    
     # basic integrity checks for each block
     for b in blocks
         @test size(b.X) == (b.IMAX, b.JMAX, b.KMAX)
