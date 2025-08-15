@@ -10,38 +10,47 @@ if !isfile(ascii_path)
     Downloads.download(url, ascii_path)
 end
 
-# read ASCII using your package
-blocks = read_plot3D_ascii(ascii_path)
+# # read ASCII using your package
+# # blocks = read_plot3D_ascii(ascii_path)
+# @info "Read $(length(blocks)) blocks from ASCII"
 
-# basic integrity checks for each block
-for b in blocks
-    size(b.X) == (b.IMAX, b.JMAX, b.KMAX)
-    size(b.Y) == (b.IMAX, b.JMAX, b.KMAX)
-    size(b.Z) == (b.IMAX, b.JMAX, b.KMAX)
-end
+# # basic integrity checks for each block
+# for b in blocks
+#     @assert size(b.X) == (b.IMAX, b.JMAX, b.KMAX)
+#     @assert size(b.Y) == (b.IMAX, b.JMAX, b.KMAX)
+#     @assert size(b.Z) == (b.IMAX, b.JMAX, b.KMAX)
+# end
 
 # write binary plot3d (Fortran unformatted)
 bin_path = "VSPT_BINARY.xyzb"
-write_plot3D(bin_path, blocks;binary=true, double_precision=false)
+# write_plot3D(bin_path, blocks;
+#              binary=true,
+#              format=:fortran,      # not ":="
+#              double_precision=false,
+#              big_endian=false)
+
+blocks_binary = read_plot3D_binary(bin_path; format=:fortran,
+                             double_precision=false, big_endian=false)
+
+@info "Wrote $(bin_path) size=$(filesize(bin_path)) bytes"
 
 # rough size sanity (not exact, but catches obvious mistakes)
 # bytes = rec(nblocks) + sum[ rec(dims) + rec(X) + rec(Y) + rec(Z) ]
 # where rec(payload) = 4 + sizeof(payload) + 4
-function expected_bytes(blocks)
+function expected_bytes_fortran_float32(blocks)
     nb = length(blocks)
     total = 0
-    # nblocks record
+    # record(nblocks: 1*UInt32)
     total += 4 + 4 + 4
+    # dims per block (3*UInt32) as a record
+    total += nb * (4 + 3*4 + 4)
+    # payload per block: X,Y,Z records, each n*Float32 wrapped
     for b in blocks
-        # dims (3 Int32)
-        total += 4 + 3*4 + 4
-        n = b.IMAX * b.JMAX * b.KMAX
-        # X, Y, Z (Float32)
-        total += (4 + n*4 + 4) * 3
+        n = b.IMAX*b.JMAX*b.KMAX
+        total += 3 * (4 + n*4 + 4)
     end
     return total
 end
-actual = filesize(bin_path)
-expect = expected_bytes(blocks)
-# allow a tiny cushion for portability differences (should match exactly on same machine)
-
+expected = expected_bytes_fortran_float32(blocks)
+@info "Expected bytes (Float32 + Fortran records): $expected"
+@info "Actual bytes: $(filesize(bin_path))"

@@ -10,3 +10,4 @@ Manifest.toml
 TestingRuns.jl
 .DS_Store
 *.xyzb
+*.xyz
