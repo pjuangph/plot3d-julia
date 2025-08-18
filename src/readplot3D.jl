@@ -130,6 +130,7 @@ function read_plot3D_binary(path::AbstractString; format::Symbol=:fortran, doubl
             # nblocks record
             nb_rec = _read_record_bytes(io, big_endian)
             nblocks = Int(reinterpret(UInt32, nb_rec)[1])
+            @info "read plot3d binary reading $(nblocks) blocks"
 
             dims = Vector{NTuple{3,Int}}(undef, nblocks)
             @inbounds for b in 1:nblocks

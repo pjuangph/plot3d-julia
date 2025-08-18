@@ -1,6 +1,8 @@
-using Test
-using Plot3D
+# using Test
+# using Plot3D
 using Downloads
+include("../src/block3D.jl")
+include("../src/readplot3D.jl")
 
 # --- test starts here --------------------------------------------------------
 url = "https://nasa-public-data.s3.amazonaws.com/plot3d_utilities/VSPT_ASCII.xyz"
@@ -29,7 +31,7 @@ bin_path = "VSPT_BINARY.xyzb"
 #              double_precision=false,
 #              big_endian=false)
 
-blocks_binary = read_plot3D_binary(bin_path; format=:fortran,
+blocks_binary = ReadPlot3D.read_plot3D_binary(bin_path; format=:fortran,
                              double_precision=false, big_endian=false)
 
 @info "Wrote $(bin_path) size=$(filesize(bin_path)) bytes"
