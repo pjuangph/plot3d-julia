@@ -29,12 +29,8 @@ blocks = endswith(meshfile, ".xyz") ?
     read_blocks(meshfile)
 
 # Use the correct face extraction for 2D or 3D blocks
-if typeof(blocks[1]) <: Plot3D.Block3DXYZ
-    block_faces = [Plot3D.Faces.block_xyz_faces(b) for b in blocks]
-elseif typeof(blocks[1]) <: Plot3D.Block3D
-    block_faces = [Plot3D.Faces.Block3DFaces(b) for b in blocks]
-else
-    block_faces = [Plot3D.Faces.Block2DFaces(b) for b in blocks]
+if typeof(blocks[1]) <: Plot3D.Block
+    block_faces = [get_faces(b) for b in blocks]
 end
 
 # Print connections
