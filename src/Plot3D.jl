@@ -32,12 +32,9 @@ include("glennht_import.jl")        # module GlennHTImport
 export Block
 using .Block3D: Block
 
-export reduce_blocks
-using .block_face_functions: reduce_blocks
 
 # =============== # IO ==========================================
 export read_plot3D_ascii, read_blocks, read_plot3D_binary, read_xyz_ascii
-using .ReadPlot3D: read_plot3D_ascii, read_blocks, read_plot3D_binary
 using .XYZReader:  read_xyz_ascii
 
 export write_plot3D
@@ -56,7 +53,7 @@ export get_faces, faces_match, find_matching_faces,
        find_closest_block, find_bounding_faces, split_face,
        find_face_nearest_point, outer_face_dict_to_list,
        match_faces_dict_to_list, face_matches_to_dict
-
+export reduce_blocks
 # =============== # Connectivity ================================
 # (defined directly by include("connectivity.jl"))
 export FaceMatchSet, point_match, select_multi_dimensional,

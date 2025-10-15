@@ -1,10 +1,10 @@
-module GlennHTExportFull
 import JSON                      # if you serialize a sidecar; or drop if not used
+import Printf: @printf
+
 import .GlennHTClasses:
     Job, BCGroup, GIF,
-    AbstractBoundaryCondition,   
+    AbstractBoundaryCondition,
     ReferenceCond, ReferenceCondFull
-using Printf
 
 export to_pa, ideal_R, mach_from_p0_over_p, T_from_T0, mu_suth, a_sound, cp_from_gamma_R,
        pr_and_k, rpm_to_omegab, populate_reference_from_inputs,
@@ -415,4 +415,3 @@ function export_to_glennht_conn(matches::Vector{Dict{String,Any}},
     return nothing
 end
 
-end # module

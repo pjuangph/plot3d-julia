@@ -1,66 +1,108 @@
-# test/test_periodicity_translated.jl
-using Test
+# test/manual/translated_periodicity_debug.jl
+# A dead-simple, print-heavy debug script (no Test / no @testset)
+
 using Downloads
-include(joinpath(@__DIR__, "..", "src", "plot3d.jl"))
+using Dates
+
+# --- resolve repo paths -------------------------------------------------------
+# This file lives in test/manual/, so src is two levels up.
+SRC_DIR  = normpath(joinpath(@__DIR__, "..", "src"))
+include(joinpath(SRC_DIR, "plot3d.jl"))
 using .Plot3D
 
-# Small helper: robust binary reader that tries both :fortran and :raw
-function _read_plot3d_binary_auto(path::AbstractString)
-    try
-        return read_plot3D_binary(path; format=:fortran, double_precision=false, big_endian=false)
-    catch
-        return read_plot3D_binary(path; format=:raw, double_precision=false, big_endian=false)
+# --- download helper ----------------------------------------------------------
+function ensure_download(url::AbstractString, dest::AbstractString; force::Bool=false)
+    if force || !isfile(dest)
+        mkpath(dirname(dest))
+        println("[$(Dates.now())] Downloading:\n  $url\n→ $dest")
+        Downloads.download(url, dest)
+    else
+        println("[$(Dates.now())] File already present:\n  $dest")
     end
+    isfile(dest) || error("File not found after download: $(abspath(dest))")
+    sz = filesize(dest)
+    sz > 0 || error("Downloaded file is empty: $(abspath(dest))")
+    return sz
 end
 
-@testset "Translated periodicity (x/y/z) on iso65_64blocks.xyz" begin
-    mktempdir() do tmp
-        cd(tmp) do
-            url = "https://nasa-public-data.s3.amazonaws.com/plot3d_utilities/iso65_64blocks.xyz"
-            path = "iso65_64blocks.xyz"
-            if !isfile(path)
-                @info "Downloading $url ..."
-                Downloads.download(url, path)
-            end
-            @test isfile(path) && filesize(path) > 0
+# --- main ---------------------------------------------------------------------
+function main(; force_download::Bool=false)
+    println("pwd = ", pwd())
+    println("SRC_DIR = ", SRC_DIR)
 
-            # In the Python example: read_plot3D(binary=True, read_double=False)
-            blocks = _read_plot3d_binary_auto(path)
-            @test !isempty(blocks)
+    # put assets under test/manual/data to keep things tidy
+    data_dir = joinpath(@__DIR__, "data")
+    mkpath(data_dir)
+    url  = "https://nasa-public-data.s3.amazonaws.com/plot3d_utilities/iso65_64blocks.xyz"
+    path = joinpath(data_dir, "iso65_64blocks.xyz")
+    sz = ensure_download(url, path; force=force_download)
+    println("exists? ", isfile(path), "   size(bytes) = ", sz)
 
-            # We’ll start with the "outer_faces" as the working set for periodicity
-            # The Julia API returns exports + remaining outer faces
-            x_export, _, outer_after_x = translational_periodicity(blocks, []; translational_direction="x")
-            y_export, _, outer_after_y = translational_periodicity(blocks, outer_after_x; translational_direction="y")
-            z_export, _, outer_after_z = translational_periodicity(blocks, outer_after_y; translational_direction="z")
+    # Read blocks (binary, float32)
+    blocks = read_plot3D_binary(path;T=Float32,big_endian=false)
+    println("blocks read = ", length(blocks))
+    isempty(blocks) && error("No blocks were read.")
 
-            @testset "Sanity checks" begin
-                @test isa(x_export, Vector)
-                @test isa(y_export, Vector)
-                @test isa(z_export, Vector)
+    # quick shape sanity for first block
+    b1 = blocks[1]
+    println("First block dims: IMAX=$(b1.IMAX) JMAX=$(b1.JMAX) KMAX=$(b1.KMAX)")
+    size(b1.X) == (b1.IMAX, b1.JMAX, b1.KMAX) || error("X size mismatch")
+    size(b1.Y) == (b1.IMAX, b1.JMAX, b1.KMAX) || error("Y size mismatch")
+    size(b1.Z) == (b1.IMAX, b1.JMAX, b1.KMAX) || error("Z size mismatch")
 
-                # We expect to find at least some periodic matches in this mesh
-                @test length(x_export) ≥ 0
-                @test length(y_export) ≥ 0
-                @test length(z_export) ≥ 0
+    # Run translated periodicity in x, then y, then z – carry remaining outer faces
+    println("\n— Translational periodicity: x —")
+    x_export, _periodic_pairs_x, outer_after_x = translational_periodicity(blocks, []; translational_direction="x")
+    println("x_export count = ", length(x_export), "   remaining outer faces = ", length(outer_after_x))
 
-                # The outer faces list should be a vector of Dicts if any remain
-                @test isa(outer_after_z, Vector)
-            end
+    println("\n— Translational periodicity: y —")
+    y_export, _periodic_pairs_y, outer_after_y = translational_periodicity(blocks, outer_after_x; translational_direction="y")
+    println("y_export count = ", length(y_export), "   remaining outer faces = ", length(outer_after_y))
 
-            # Optional: combine all matches + any existing connectivity to mimic the Python example
-            all_periodic = vcat(x_export, y_export, z_export)
-            @info "periodic matches: x=$(length(x_export)) y=$(length(y_export)) z=$(length(z_export)) total=$(length(all_periodic))"
+    println("\n— Translational periodicity: z —")
+    z_export, _periodic_pairs_z, outer_after_z = translational_periodicity(blocks, outer_after_y; translational_direction="z")
+    println("z_export count = ", length(z_export), "   remaining outer faces = ", length(outer_after_z))
 
-            # Very light structural validation: each match dict should have the standard fields
-            function _ok_face(d::Dict)
-                required = ("block_index","IMIN","JMIN","KMIN","IMAX","JMAX","KMAX")
-                all(haskey(d, k) for k in required)
-            end
-            function _ok_pair(d::Dict)
-                haskey(d,"block1") && haskey(d,"block2") && _ok_face(d["block1"]) && _ok_face(d["block2"])
-            end
-            @test all(_ok_pair, all_periodic)
-        end
+    # Combine and lightly validate structure
+    all_periodic = vcat(x_export, y_export, z_export)
+    println("\nTOTAL periodic matches = ", length(all_periodic))
+
+    # minimal structure checks with actionable messages
+    function _ok_face(d::Dict)
+        required = ("block_index","IMIN","JMIN","KMIN","IMAX","JMAX","KMAX")
+        missing = [k for k in required if !haskey(d, k)]
+        isempty(missing) || error("face dict missing keys: $(missing)  → dict=$(d)")
+        return true
     end
+    function _ok_pair(d::Dict)
+        haskey(d,"block1") || error("pair dict missing 'block1': $(d)")
+        haskey(d,"block2") || error("pair dict missing 'block2': $(d)")
+        _ok_face(d["block1"]); _ok_face(d["block2"])
+        return true
+    end
+
+    if !isempty(all_periodic)
+        println("Sample periodic pair:\n", all_periodic[1])
+        for (i,p) in enumerate(all_periodic)
+            try
+                _ok_pair(p)
+            catch e
+                error("Bad periodic pair at index $(i): $(e)")
+            end
+        end
+    else
+        println("No periodic pairs found (that can be fine depending on mesh/orientation).")
+    end
+
+    println("\nDone.")
+end
+
+try
+    main()  # set force_download=true to re-fetch
+catch e
+    println("\nERROR: ", e)
+    println("\nSTACKTRACE:")
+    showerror(stdout, e, catch_backtrace())
+    println()
+    rethrow()
 end
