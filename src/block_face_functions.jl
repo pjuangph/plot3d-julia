@@ -8,6 +8,22 @@ import .Block3D: Block
 import .Face3D: Face, add_vertex, vertices_equals, index_equals, normal, match_indices, to_dict, set_block_index, set_face_id, is_edge
 import .Utils: unique_pairs
 
+# Face + block helpers (from block_face_functions.jl)
+export reduce_blocks,
+       get_faces,
+       faces_match,
+       find_matching_faces,
+       get_outer_faces,          # both single-block and vector-of-blocks methods
+       get_outer_face_dicts,     # both single-block and vector-of-blocks methods
+       create_face_from_diagonals,
+       find_connected_faces,
+       find_closest_block,
+       find_bounding_faces,
+       split_face,
+       find_face_nearest_point,
+       outer_face_dict_to_list,
+       match_faces_dict_to_list,
+       face_matches_to_dict
 # =============================================================================
 # Block reduction (moved from BlockFunctions)
 # =============================================================================
@@ -107,84 +123,87 @@ function find_matching_faces(block1::Block, block2::Block; tol::Real = 1e-8)
 end
 
 # -----------------------------------------------------------------------------
-# get_outer_faces
+# get_outer_faces for multiple blocks (Python-style convenience)
 # -----------------------------------------------------------------------------
-function get_outer_faces(block::Block)
-    I = (0, block.IMAX - 1)
-    J = (0, block.JMAX - 1)
-    K = (0, block.KMAX - 1)
+# -----------------------------------------------------------------------------
+# get_outer_faces — single block
+# -----------------------------------------------------------------------------
+"""
+    get_outer_faces(b::Block; block_index::Int=0) -> Vector{Face}
 
-    faces = Face[]
+Return the 4/6 canonical boundary faces for a single block `b`
+(imin/imax, jmin/jmax, and kmin/kmax when `b.KMAX>1`).
 
-    # i = I[1]
-    face = Face(4)
-    i = I[1]
-    @inbounds for j in J, k in K
-        add_vertex(face, block.X[i+1, j+1, k+1], block.Y[i+1, j+1, k+1], block.Z[i+1, j+1, k+1], i, j, k)
+`block_index` is stored on each returned `Face` as **zero-based** to match
+the Python schema (default = 0).
+"""
+function get_outer_faces(b::Block; block_index::Int=0)
+    out = Face[]
+    # imin
+    f = create_face_from_diagonals(b, 0, 0, 0, 0, b.JMAX-1, b.KMAX-1)
+    set_block_index(f, block_index); push!(out, f)
+    # imax
+    f = create_face_from_diagonals(b, b.IMAX-1, 0, 0, b.IMAX-1, b.JMAX-1, b.KMAX-1)
+    set_block_index(f, block_index); push!(out, f)
+    # jmin
+    f = create_face_from_diagonals(b, 0, 0, 0, b.IMAX-1, 0, b.KMAX-1)
+    set_block_index(f, block_index); push!(out, f)
+    # jmax
+    f = create_face_from_diagonals(b, 0, b.JMAX-1, 0, b.IMAX-1, b.JMAX-1, b.KMAX-1)
+    set_block_index(f, block_index); push!(out, f)
+    # k-planes (3D only)
+    if b.KMAX > 1
+        f = create_face_from_diagonals(b, 0, 0, 0, b.IMAX-1, b.JMAX-1, 0)
+        set_block_index(f, block_index); push!(out, f)
+        f = create_face_from_diagonals(b, 0, 0, b.KMAX-1, b.IMAX-1, b.JMAX-1, b.KMAX-1)
+        set_block_index(f, block_index); push!(out, f)
     end
-    push!(faces, face)
-
-    # i = I[2]
-    face = Face(4)
-    i = I[2]
-    @inbounds for j in J, k in K
-        add_vertex(face, block.X[i+1, j+1, k+1], block.Y[i+1, j+1, k+1], block.Z[i+1, j+1, k+1], i, j, k)
-    end
-    push!(faces, face)
-
-    # j = J[1]
-    face = Face(4)
-    j = J[1]
-    @inbounds for i in I, k in K
-        add_vertex(face, block.X[i+1, j+1, k+1], block.Y[i+1, j+1, k+1], block.Z[i+1, j+1, k+1], i, j, k)
-    end
-    push!(faces, face)
-
-    # j = J[2]
-    face = Face(4)
-    j = J[2]
-    @inbounds for i in I, k in K
-        add_vertex(face, block.X[i+1, j+1, k+1], block.Y[i+1, j+1, k+1], block.Z[i+1, j+1, k+1], i, j, k)
-    end
-    push!(faces, face)
-
-    if block.KMAX > 1
-        # k = K[1]
-        face = Face(4)
-        k = K[1]
-        @inbounds for i in I, j in J
-            add_vertex(face, block.X[i+1, j+1, k+1], block.Y[i+1, j+1, k+1], block.Z[i+1, j+1, k+1], i, j, k)
-        end
-        push!(faces, face)
-
-        # k = K[2]
-        face = Face(4)
-        k = K[2]
-        @inbounds for i in I, j in J
-            add_vertex(face, block.X[i+1, j+1, k+1], block.Y[i+1, j+1, k+1], block.Z[i+1, j+1, k+1], i, j, k)
-        end
-        push!(faces, face)
-    end
-
-    matching = Tuple{Int,Int}[]
-    non_matching = Face[]
-
-    @inbounds for a in eachindex(faces)
-        matchFound = false
-        for b in eachindex(faces)
-            if a != b && vertices_equals(faces[a], faces[b])
-                push!(matching, (a, b))
-                matchFound = true
-            end
-        end
-        !matchFound && push!(non_matching, faces[a])
-    end
-
-    matching = unique_pairs(matching)
-    matching_pairs = [(faces[i], faces[j]) for (i, j) in matching]
-    return non_matching, matching_pairs
+    return out
 end
 
+# -----------------------------------------------------------------------------
+# get_outer_faces — vector of blocks (Python-style convenience)
+# -----------------------------------------------------------------------------
+"""
+    get_outer_faces(blocks::Vector{Block}) -> Vector{Face}
+
+Return the canonical boundary faces for every block in `blocks`.
+Each `Face` gets its `BlockIndex` set to the block’s **zero-based** index.
+"""
+function get_outer_faces(blocks::Vector{Block})
+    out = Face[]
+    for (bi, b) in enumerate(blocks)
+        append!(out, get_outer_faces(b; block_index=bi-1))
+    end
+    return out
+end
+
+# -----------------------------------------------------------------------------
+# Dict helpers (if you need Python-style dict outputs)
+# -----------------------------------------------------------------------------
+"""
+    get_outer_face_dicts(b::Block; block_index::Int=0) -> Vector{Dict{String,Int}}
+"""
+function get_outer_face_dicts(b::Block; block_index::Int=0)
+    return [Dict(
+        "block_index"=>f.BlockIndex,
+        "IMIN"=>f.IMIN, "JMIN"=>f.JMIN, "KMIN"=>f.KMIN,
+        "IMAX"=>f.IMAX, "JMAX"=>f.JMAX, "KMAX"=>f.KMAX,
+        "id"=>f.id,
+    ) for f in get_outer_faces(b; block_index=block_index)]
+end
+
+"""
+    get_outer_face_dicts(blocks::Vector{Block}) -> Vector{Dict{String,Int}}
+"""
+function get_outer_face_dicts(blocks::Vector{Block})
+    return [Dict(
+        "block_index"=>f.BlockIndex,
+        "IMIN"=>f.IMIN, "JMIN"=>f.JMIN, "KMIN"=>f.KMIN,
+        "IMAX"=>f.IMAX, "JMAX"=>f.JMAX, "KMAX"=>f.KMAX,
+        "id"=>f.id,
+    ) for f in get_outer_faces(blocks)]
+end
 # -----------------------------------------------------------------------------
 # create_face_from_diagonals
 # -----------------------------------------------------------------------------

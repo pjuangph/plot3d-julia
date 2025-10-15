@@ -9,7 +9,7 @@ using Printf
 # This file lives in test/manual/, so src is two levels up.
 SRC_DIR  = normpath(joinpath(@__DIR__, "..", "src"))
 include(joinpath(SRC_DIR, "plot3d.jl"))
-using .Plot3D
+using .Plot3D: read_plot3D_binary, connectivity_fast, Block, match_faces_dict_to_list, outer_face_dict_to_list
 
 # --- download helper ----------------------------------------------------------
 function ensure_download(url::AbstractString, dest::AbstractString; force::Bool=false)
@@ -53,7 +53,10 @@ function main(; force_download::Bool=false)
     
     # 2) Connectivity: face_matches, outer_faces
     println("\nFinding connectivity …")
-    face_matches, outer_faces = Plot3D.connectivity_fast(blocks)
+    methods(connectivity_fast) |> println
+    typeof(blocks) |> println  # should be Vector{Plot3D.Block} (aka .Block3D.Block)
+
+    face_matches, outer_faces = connectivity_fast(blocks)
     @printf("Got %d face_matches and %d outer_faces (dicts)\n",
             length(face_matches), length(outer_faces))
 

@@ -2,8 +2,6 @@ module ReadPlot3D
 
 using ..Block3D: Block
 
-export read_plot3D_ascii, read_blocks, read_plot3D_binary
-
 # ==============================================================
 # Endian + binary helpers (RAW only; no Fortran record markers)
 # ==============================================================

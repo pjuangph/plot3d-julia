@@ -10,7 +10,7 @@ import Statistics: mean
 
 # =============== Includes (load order matters) =================
 include("block3D.jl")          # module Block3D
-include("face3D.jl")             # module Face3D
+include("face.jl")             # module Face3D
 include("utils.jl")            # module Utils  <-- needed by facefunctions/connectivity
 include("block_face_functions.jl")     # reduce_blocks + face algorithms in Plot3D scope
 include("connectivity.jl")     # functions live directly in Plot3D
@@ -30,13 +30,12 @@ include("glennht_import.jl")        # module GlennHTImport
 
 # =============== # Core types =================================
 export Block
-using .Block3D: Block
+using .Block3D: Block, recompute_centroid!
 
 
 # =============== # IO ==========================================
 export read_plot3D_ascii, read_blocks, read_plot3D_binary, read_xyz_ascii
-
-using .ReadPlot3D: read_plot3D_ascii, read_blocks, read_plot3D_binary   # ← add this
+using .ReadPlot3D: read_plot3D_ascii, read_blocks, read_plot3D_binary 
 using .XYZReader:  read_xyz_ascii
 
 # =============== # Face core ===================================
@@ -52,9 +51,13 @@ export get_faces, faces_match, find_matching_faces,
        find_closest_block, find_bounding_faces, split_face,
        find_face_nearest_point, outer_face_dict_to_list,
        match_faces_dict_to_list, face_matches_to_dict
+
 export reduce_blocks
 # =============== # Connectivity ================================
 # (defined directly by include("connectivity.jl"))
+using .Connectivity: FaceMatchSet, point_match, select_multi_dimensional,
+       find_matching_blocks, combinations_of_nearest_blocks,
+       get_face_intersection, connectivity_fast, block_connection_matrix
 export FaceMatchSet, point_match, select_multi_dimensional,
        find_matching_blocks, combinations_of_nearest_blocks,
        get_face_intersection, connectivity_fast, block_connection_matrix
