@@ -5,186 +5,222 @@ using ..Block3D: Block
 export read_plot3D_ascii, read_blocks, read_plot3D_binary
 
 # ==============================================================
-# Helpers
+# Endian + binary helpers (RAW only; no Fortran record markers)
 # ==============================================================
 
-# Read one block (ASCII): dims line then X,Y,Z in that order
+_unsigned(::Type{Int32})   = UInt32
+_unsigned(::Type{UInt32})  = UInt32
+_unsigned(::Type{Float32}) = UInt32
+_unsigned(::Type{Float64}) = UInt64
+
+const HOST_IS_LITTLE_ENDIAN = ENDIAN_BOM == UInt32(0x04030201)
+
+@inline function _read_u32(io::IO, big_endian::Bool)::UInt32
+    u = read(io, UInt32)
+    return (big_endian == HOST_IS_LITTLE_ENDIAN) ? bswap(u) : u
+end
+@inline _read_i32(io::IO, big_endian::Bool)::Int32 = reinterpret(Int32, _read_u32(io, big_endian))
+
+# Interpret a byte buffer as a vector of T, swapping endianness in-place if needed
+function _bytes_as_vector_T!(buf::Vector{UInt8}, ::Type{T}, big_endian::Bool) where {T<:Union{Float32,Float64}}
+    (length(buf) % sizeof(T) == 0) || error("Byte buffer length $(length(buf)) not multiple of sizeof($(T))=$(sizeof(T))")
+    vecT = reinterpret(T, buf)  # view onto buf
+    if big_endian == HOST_IS_LITTLE_ENDIAN
+        uw = reinterpret(_unsigned(T), vecT)
+        @inbounds for i in eachindex(uw)
+            uw[i] = bswap(uw[i])
+        end
+    end
+    return vecT
+end
+
+# Read n values of T (RAW; no record markers)
+function _read_values_T(io::IO, ::Type{T}, n::Int, big_endian::Bool) where {T<:Union{Float32,Float64}}
+    nbytes = n * sizeof(T)
+    buf = Vector{UInt8}(undef, nbytes)
+    read!(io, buf)
+    return _bytes_as_vector_T!(buf, T, big_endian)
+end
+
+# ==============================================================
+# ASCII reader
+# ==============================================================
+
+# Consume and return next non-empty line (keeps simple ASCII variant)
+function _next_data_line(io::IO)
+    while !eof(io)
+        ln = strip(readline(io))
+        if !isempty(ln)
+            return ln
+        end
+    end
+    return ""
+end
+
+# Read exactly n reals of type T from ASCII (can span multiple lines)
+function _read_n_reals_ascii!(io::IO, n::Int, ::Type{T}) where {T<:Real}
+    out = Vector{T}(undef, n)
+    i = 1
+    while i <= n
+        eof(io) && error("Unexpected EOF while reading ASCII values (needed $n, got $(i-1))")
+        ln = strip(readline(io))
+        isempty(ln) && continue
+        for tok in eachsplit(ln)
+            out[i] = parse(T, tok)
+            i += 1
+            i > n && break
+        end
+    end
+    return out
+end
+
+# Read one block (ASCII): dims line then X,Y,Z in i–j–k order
 function _read_block_ascii!(io::IO, ::Type{T}) where {T<:Real}
-    line = ""
-    while !eof(io) && isempty(strip(line))
-        line = readline(io)               # skip empties/comments space
-    end
-    eof(io) && error("Unexpected EOF while reading block dimensions")
-    dims = split(strip(line))
-    length(dims) == 3 || error("Expected 3 integers for I J K, got: $line")
-    I = parse(Int, dims[1]); J = parse(Int, dims[2]); K = parse(Int, dims[3])
+    dimline = strip(_next_data_line(io))
+    isempty(dimline) && error("Unexpected EOF while reading block dimensions")
+    parts = split(dimline)
+    length(parts) >= 3 || error("Expected 3 integers for I J K, got: '$dimline'")
+    I = parse(Int, parts[1]); J = parse(Int, parts[2]); K = parse(Int, parts[3])
+    (I>0 && J>0 && K>0) || error("Non-positive block dims: ($I,$J,$K)")
 
     n = I*J*K
-    X = Array{T}(undef, I,J,K)
-    Y = Array{T}(undef, I,J,K)
-    Z = Array{T}(undef, I,J,K)
+    vx = _read_n_reals_ascii!(io, n, T)
+    vy = _read_n_reals_ascii!(io, n, T)
+    vz = _read_n_reals_ascii!(io, n, T)
 
-    # Read n numbers for each of X, Y, Z
-    # Use a local buffer and fill! with Cartesian indexing
-    function _fill3!(A::Array{T,3})
-        filled = 0
-        Ci = CartesianIndices(A)
-        it = Iterators.take(Ci, n)
-        for IJK in it
-            # read numbers skipping blank lines
-            val::Union{Nothing,T} = nothing
-            while val === nothing
-                eof(io) && error("Unexpected EOF reading coordinate values")
-                line = strip(readline(io))
-                isempty(line) && continue
-                for tok in eachsplit(line)
-                    A[IJK] = parse(T, tok)
-                    filled += 1
-                    IJK = iterate(Ci, IJK)[1]  # move to next IJK
-                    if filled == n
-                        return
-                    end
-                end
-            end
-        end
+    X = Array{Float64,3}(undef, I,J,K)
+    Y = Array{Float64,3}(undef, I,J,K)
+    Z = Array{Float64,3}(undef, I,J,K)
+    idx = 1
+    @inbounds for k in 1:K, j in 1:J, i in 1:I
+        X[i,j,k] = Float64(vx[idx])
+        Y[i,j,k] = Float64(vy[idx])
+        Z[i,j,k] = Float64(vz[idx])
+        idx += 1
     end
-
-    _fill3!(X); _fill3!(Y); _fill3!(Z)
     return Block(X,Y,Z)
 end
-
-# Unformatted Fortran read helpers (4-byte record markers)
-# If record_markers=false, we read raw payload directly.
-struct _Endian{B} end
-const _BE = _Endian{:be}()
-const _LE = _Endian{:le}()
-
-@inline function _read_i32(io::IO, ::_Endian{:be})
-    b = read(io, UInt32); return Int32(ntoh(b))   # ntoh = big-endian
-end
-@inline function _read_i32(io::IO, ::_Endian{:le})
-    b = read(io, UInt32); return Int32(b)        # host assumed little; UInt32 read is LE
-end
-
-# read `N` reals of type T into a preallocated vector
-function _read_reals!(io::IO, buf::Vector{T}) where {T<:Real}
-    read!(io, reinterpret(UInt8, buf))  # raw bulk read
-    return buf
-end
-
-# Read one block (binary): dims then X,Y,Z (each in its own record if markers=true)
-function _read_block_binary!(io::IO, ::Type{T}; big_endian::Bool=true, record_markers::Bool=true) where {T<:Real}
-    endian = big_endian ? _BE : _LE
-
-    # dims: either in a record (with marker) or raw
-    if record_markers
-        reclen1 = _read_i32(io, endian)
-        reclen1 == 12 || error("Expected 12-byte dims record, got $reclen1")
-    end
-    I = Int(read(io, Int32)); J = Int(read(io, Int32)); K = Int(read(io, Int32))
-    if record_markers
-        _ = _read_i32(io, endian)  # closing marker
-    end
-
-    n = I*J*K
-    X = Array{T}(undef, I,J,K)
-    Y = Array{T}(undef, I,J,K)
-    Z = Array{T}(undef, I,J,K)
-
-    # helper to read one record of n*T bytes (or raw if no markers)
-    function _read_field!(A::Array{T,3})
-        buf = Vector{T}(undef, length(A))
-        if record_markers
-            reclen = _read_i32(io, endian)
-            reclen == sizeof(T)*length(A) || error("Record length mismatch: expected $(sizeof(T)*length(A)), got $reclen")
-            _read_reals!(io, buf)
-            _ = _read_i32(io, endian)
-        else
-            _read_reals!(io, buf)
-        end
-        # Fortran usually writes in the same linear order as Julia's column-major,
-        # but some generators differ; if you observe transposed axes, swap here.
-        A[:] .= buf
-        return nothing
-    end
-
-    _read_field!(X); _read_field!(Y); _read_field!(Z)
-    return Block(X,Y,Z)
-end
-
-# ==============================================================
-# Public API
-# ==============================================================
 
 """
     read_plot3D_ascii(path; T=Float64)
 
-Read a multi-block Plot3D **grid** file in ASCII format.
-File layout (common NASA variant):
+Read a multi-block Plot3D **grid** file in ASCII format:
 - first non-empty line: integer `nb` (number of blocks)
-- for each block: line with `I J K`
-- then `I*J*K` reals for `X`, then same for `Y`, then same for `Z`.
-
+- for each block: `I J K`, then `I*J*K` reals for X, then Y, then Z (i–j–k order).
 Returns `Vector{Block}`.
 """
 function read_plot3D_ascii(path::AbstractString; T::Type{<:Real}=Float64)
     open(path, "r") do io
-        # skip empties/comments to find nb
-        line = ""
-        while !eof(io) && isempty(strip(line))
-            line = readline(io)
-        end
-        eof(io) && error("Empty Plot3D ASCII file")
-        nb = parse(Int, split(strip(line))[1])
+        first = strip(_next_data_line(io))
+        isempty(first) && error("Empty Plot3D ASCII file")
+        nb = parse(Int, split(first)[1])
+        (nb > 0) || error("Invalid number of blocks: $nb")
         blocks = Vector{Block}(undef, nb)
-        for b in 1:nb
+        @inbounds for b in 1:nb
             blocks[b] = _read_block_ascii!(io, T)
         end
         return blocks
     end
 end
 
+# ==============================================================
+# RAW binary reader (no Fortran record markers)
+# ==============================================================
+
+# Read one block (RAW): dims then X,Y,Z (all contiguous)
+function _read_block_binary_raw!(io::IO, ::Type{T}; big_endian::Bool=false) where {T<:Union{Float32,Float64}}
+    I = Int(_read_i32(io, big_endian))
+    J = Int(_read_i32(io, big_endian))
+    K = Int(_read_i32(io, big_endian))
+    (I>0 && J>0 && K>0) || error("Non-positive block dims: ($I,$J,$K)")
+
+    n = I*J*K
+    vX = _read_values_T(io, T, n, big_endian)
+    vY = _read_values_T(io, T, n, big_endian)
+    vZ = _read_values_T(io, T, n, big_endian)
+
+    X = Array{Float64,3}(undef, I,J,K)
+    Y = Array{Float64,3}(undef, I,J,K)
+    Z = Array{Float64,3}(undef, I,J,K)
+    idx = 1
+    @inbounds for k in 1:K, j in 1:J, i in 1:I
+        X[i,j,k] = Float64(vX[idx])
+        Y[i,j,k] = Float64(vY[idx])
+        Z[i,j,k] = Float64(vZ[idx])
+        idx += 1
+    end
+    return Block(X,Y,Z)
+end
+
 """
-    read_plot3D_binary(path; T=Float64, big_endian=true, record_markers=true)
+    read_plot3D_binary(path; T=Float32, big_endian=false)
 
-Read a multi-block Plot3D **grid** file in unformatted Fortran binary.
-Assumes:
-- Leading record with `nb::Int32` (if `record_markers=true`)
-- For each block:
-    - dims record: `Int32 I, Int32 J, Int32 K`
-    - record for `X` (I*J*K values of `T`)
-    - record for `Y`
-    - record for `Z`
+Read a multi-block Plot3D **grid** file in RAW binary (no record markers).
+Layout:
+- `Int32 nb`
+- For each block: `Int32 I, Int32 J, Int32 K`
+- Then for each block: X, Y, Z — each `I*J*K` reals of type `T` in i–j–k order.
 
-If `record_markers=false`, we read raw payload in the same order without markers.
 Returns `Vector{Block}`.
 """
-function read_plot3D_binary(path::AbstractString; T::Type{<:Real}=Float64, big_endian::Bool=true, record_markers::Bool=true)
+function read_plot3D_binary(path::AbstractString;
+    T::Type{<:Union{Float32,Float64}} = Float32,
+    big_endian::Bool = false
+)
     open(path, "r") do io
-        endian = big_endian ? _BE : _LE
-        nb::Int
-        if record_markers
-            len1 = _read_i32(io, endian)
-            len1 == 4 || error("Expected 4-byte record for nb, got $len1")
-            nb = Int(read(io, Int32))
-            _ = _read_i32(io, endian)
-        else
-            nb = Int(read(io, Int32))
+        # --- header: number of blocks ---
+        nb = Int(_read_i32(io, big_endian))
+        (nb > 0) || error("Invalid number of blocks: $nb")
+
+        # --- header: per-block dimensions (peek+store so payload can be read later) ---
+        dims = Vector{NTuple{3,Int}}(undef, nb)
+        @inbounds for b in 1:nb
+            I = Int(_read_i32(io, big_endian))
+            J = Int(_read_i32(io, big_endian))
+            K = Int(_read_i32(io, big_endian))
+            (I>0 && J>0 && K>0) || error("Non-positive dims for block $b: ($I,$J,$K)")
+            dims[b] = (I, J, K)
         end
+
+        # --- payload: X,Y,Z per block ---
         blocks = Vector{Block}(undef, nb)
-        for b in 1:nb
-            blocks[b] = _read_block_binary!(io, T; big_endian=big_endian, record_markers=record_markers)
+        @inbounds for b in 1:nb
+            I, J, K = dims[b]
+            n = I*J*K
+
+            vX = _read_values_T(io, T, n, big_endian)
+            vY = _read_values_T(io, T, n, big_endian)
+            vZ = _read_values_T(io, T, n, big_endian)
+
+            X = Array{Float64,3}(undef, I,J,K)
+            Y = Array{Float64,3}(undef, I,J,K)
+            Z = Array{Float64,3}(undef, I,J,K)
+
+            idx = 1
+            @inbounds for k in 1:K, j in 1:J, i in 1:I
+                X[i,j,k] = Float64(vX[idx])
+                Y[i,j,k] = Float64(vY[idx])
+                Z[i,j,k] = Float64(vZ[idx])
+                idx += 1
+            end
+
+            blocks[b] = Block(X, Y, Z)
         end
+
         return blocks
     end
 end
+
+# ==============================================================
+# Unified front-end
+# ==============================================================
 
 """
     read_blocks(path; fmt=:ascii, kwargs...)
 
 Convenience wrapper:
 - `fmt = :ascii`  => `read_plot3D_ascii(path; kwargs...)`
-- `fmt = :binary` => `read_plot3D_binary(path; kwargs...)`
+- `fmt = :binary` => `read_plot3D_binary(path; kwargs...)`  (RAW only)
 """
 function read_blocks(path::AbstractString; fmt::Symbol=:ascii, kwargs...)
     if fmt === :ascii

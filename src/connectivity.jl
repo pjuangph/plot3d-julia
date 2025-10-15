@@ -3,9 +3,10 @@
 import LinearAlgebra: norm
 import Statistics: mean
 
-import .Block3D: Block
-# Pull helpers that live directly in the Plot3D module (from facefunctions.jl include)
-import .Plot3D: faces_match, create_face_from_diagonals, face_matches_to_dict
+using .Block3D: Block
+using .Face3D: Face, set_block_index
+# Pull helpers that live directly in the Plot3D module (from face algorithms)
+using .Plot3D: faces_match, create_face_from_diagonals, face_matches_to_dict
 
 # -----------------------------------------------------------------------------
 # Types
@@ -14,7 +15,8 @@ import .Plot3D: faces_match, create_face_from_diagonals, face_matches_to_dict
 Light container for a set of face matches.
 
 Use `pairs` when you only need (block, face-name) tuples,
-or use the dicts returned by `find_matching_blocks` if you need index ranges.
+or use the dicts returned by `find_matching_blocks` / `connectivity_fast`
+if you need index ranges.
 """
 struct FaceMatchSet
     pairs::Vector{Tuple{Tuple{Int,Symbol},Tuple{Int,Symbol}}}
@@ -78,6 +80,23 @@ function _all_face_names(b::Block)
     return names
 end
 
+# Build a Face object that spans the full canonical face (index-space) for a block
+function _make_full_face(b::Block, face_name::String)
+    if face_name === "imin"
+        return create_face_from_diagonals(b, 0, 0, 0, 0, b.JMAX-1, b.KMAX-1)
+    elseif face_name === "imax"
+        return create_face_from_diagonals(b, b.IMAX-1, 0, 0, b.IMAX-1, b.JMAX-1, b.KMAX-1)
+    elseif face_name === "jmin"
+        return create_face_from_diagonals(b, 0, 0, 0, b.IMAX-1, 0, b.KMAX-1)
+    elseif face_name === "jmax"
+        return create_face_from_diagonals(b, 0, b.JMAX-1, 0, b.IMAX-1, b.JMAX-1, b.KMAX-1)
+    elseif face_name === "kmin"
+        return create_face_from_diagonals(b, 0, 0, 0, b.IMAX-1, b.JMAX-1, 0)
+    else # "kmax"
+        return create_face_from_diagonals(b, 0, 0, b.KMAX-1, b.IMAX-1, b.JMAX-1, b.KMAX-1)
+    end
+end
+
 # -----------------------------------------------------------------------------
 # find_matching_blocks
 # -----------------------------------------------------------------------------
@@ -91,11 +110,12 @@ Returns a vector of **match dictionaries** compatible with your Python output,
 using the same schema as produced by `face_matches_to_dict`.
 
 Each element looks like:
-Dict(
+    Dict(
     "block1" => Dict("block_index"=>i, "IMIN"=>..., "JMIN"=>..., "KMIN"=>..., "IMAX"=>..., "JMAX"=>..., "KMAX"=>..., "id"=>...),
-    "block2" => Dict( ... same keys ... )
-)
-The index ranges are filled so that lower/upper corners correspond between faces.
+    "block2" => Dict( … same keys … )
+    )
+
+    The index ranges are filled so that lower/upper corners correspond between faces.
 """
 function find_matching_blocks(blocks::Vector{Block}; tol::Real=1e-8)
     n = length(blocks)
@@ -128,37 +148,10 @@ function find_matching_blocks(blocks::Vector{Block}; tol::Real=1e-8)
                 Ai = _get_face_arrays_named(bi, fi)
                 for fj in face_names[j]
                     Aj = _get_face_arrays_named(bj, fj)
-                    ok, flips = faces_match(Ai, Aj; tol=tol)
+                    ok, _ = faces_match(Ai, Aj; tol=tol)
                     if ok
-                        # Build Face objects from full index spans to encode ranges in the dict.
-                        if fi === "imin"
-                            f1 = create_face_from_diagonals(bi, 0, 0, 0, 0, bi.JMAX-1, bi.KMAX-1)
-                        elseif fi === "imax"
-                            f1 = create_face_from_diagonals(bi, bi.IMAX-1, 0, 0, bi.IMAX-1, bi.JMAX-1, bi.KMAX-1)
-                        elseif fi === "jmin"
-                            f1 = create_face_from_diagonals(bi, 0, 0, 0, bi.IMAX-1, 0, bi.KMAX-1)
-                        elseif fi === "jmax"
-                            f1 = create_face_from_diagonals(bi, 0, bi.JMAX-1, 0, bi.IMAX-1, bi.JMAX-1, bi.KMAX-1)
-                        elseif fi === "kmin"
-                            f1 = create_face_from_diagonals(bi, 0, 0, 0, bi.IMAX-1, bi.JMAX-1, 0)
-                        else # "kmax"
-                            f1 = create_face_from_diagonals(bi, 0, 0, bi.KMAX-1, bi.IMAX-1, bi.JMAX-1, bi.KMAX-1)
-                        end
-
-                        if fj === "imin"
-                            f2 = create_face_from_diagonals(bj, 0, 0, 0, 0, bj.JMAX-1, bj.KMAX-1)
-                        elseif fj === "imax"
-                            f2 = create_face_from_diagonals(bj, bj.IMAX-1, 0, 0, bj.IMAX-1, bj.JMAX-1, bj.KMAX-1)
-                        elseif fj === "jmin"
-                            f2 = create_face_from_diagonals(bj, 0, 0, 0, bj.IMAX-1, 0, bj.KMAX-1)
-                        elseif fj === "jmax"
-                            f2 = create_face_from_diagonals(bj, 0, bj.JMAX-1, 0, bj.IMAX-1, bj.JMAX-1, bj.KMAX-1)
-                        elseif fj === "kmin"
-                            f2 = create_face_from_diagonals(bj, 0, 0, 0, bj.IMAX-1, bj.JMAX-1, 0)
-                        else # "kmax"
-                            f2 = create_face_from_diagonals(bj, 0, 0, bj.KMAX-1, bj.IMAX-1, bj.JMAX-1, bj.KMAX-1)
-                        end
-
+                        f1 = _make_full_face(bi, fi)
+                        f2 = _make_full_face(bj, fj)
                         set_block_index(f1, i-1); set_block_index(f2, j-1)
                         push!(matches, face_matches_to_dict(f1, f2, bi, bj))
                     end
@@ -209,7 +202,7 @@ function combinations_of_nearest_blocks(blocks::Vector{Block}; nearest_nblocks::
 end
 
 # -----------------------------------------------------------------------------
-# get_face_intersection
+# get_face_intersection (simple full-face variant)
 # -----------------------------------------------------------------------------
 """
     get_face_intersection(face1::Face, face2::Face, block1::Block, block2::Block; tol=1e-8)
@@ -217,15 +210,13 @@ end
 Return a vector with **one** match dictionary describing how `face1` maps to `face2`
 (using the same schema as `face_matches_to_dict`). This **first pass** assumes the
 faces fully match (typical CFD abutting faces). If you need **partial overlaps**,
-we can extend this to compute tight index windows by projecting and scanning
-the shared parameter lines.
+extend this to compute tight index windows by projecting and scanning parameter lines.
 
 Returns: `Vector{Dict{String,Any}}` with length 1 when matched, or `Vector{Dict{String,Any}}()` if not matched.
 """
-function get_face_intersection(face1, face2, block1::Block, block2::Block; tol::Real=1e-8)
-    # Build the 2D arrays for each face to test a match (fast corner test with reversals)
-    function _arrays_from_face(b::Block, f)
-        # infer which axis is constant by comparing min==max of index ranges
+function get_face_intersection(face1::Face, face2::Face, block1::Block, block2::Block; tol::Real=1e-8)
+    # Build 2D arrays for each face to test a match (fast corner test with reversals)
+    function _arrays_from_face(b::Block, f::Face)
         if f.IMIN == f.IMAX
             a = f.IMIN + 1
             return (view(b.X, a, f.JMIN+1:f.JMAX+1, f.KMIN+1:f.KMAX+1),
@@ -253,4 +244,107 @@ function get_face_intersection(face1, face2, block1::Block, block2::Block; tol::
 
     # For full-face matches, a single dict maps the lower/upper corners.
     return [face_matches_to_dict(face1, face2, block1, block2)]
+end
+
+# -----------------------------------------------------------------------------
+# connectivity_fast (Python-compatible surface)
+# -----------------------------------------------------------------------------
+"""
+    connectivity_fast(blocks; tol=1e-8)
+
+Lightweight, pragmatic connectivity finder.
+
+Returns:
+- `face_matches::Vector{Dict{String,Any}}` (same schema as Python’s `connectivity_fast`)
+- `outer_faces::Vector{Dict{String,Int}}`   (canonical faces that did not match)
+
+Notes:
+- This variant compares **canonical faces** only (imin/imax/jmin/jmax/kmin/kmax) and
+  does **not** split partial overlaps. If you need splitting, we can extend this.
+"""
+function connectivity_fast(blocks::Vector{Block}; tol::Real=1e-8)
+    n = length(blocks)
+    face_names = [ _all_face_names(b) for b in blocks ]
+
+    # Build (block, face_name, Face) inventory
+    faces = Vector{Tuple{Int,String,Face}}()
+    for i in 1:n
+        bi = blocks[i]
+        for fn in face_names[i]
+            f = _make_full_face(bi, fn)
+            set_block_index(f, i-1)  # 0-based in dicts, like Python
+            push!(faces, (i, fn, f))
+        end
+    end
+
+    # Try to match every pair across different blocks
+    matched_pairs = Vector{Tuple{Int,Int}}()  # indices into `faces`
+    match_dicts   = Dict{String,Any}[]
+
+    for a in 1:length(faces)-1
+        ia, fna, fa = faces[a]
+        Aa = _get_face_arrays_named(blocks[ia], fna)
+        for b in a+1:length(faces)
+            ib, fnb, fb = faces[b]
+            ia == ib && continue # skip same-block duplicates
+            Ab = _get_face_arrays_named(blocks[ib], fnb)
+            ok, _ = faces_match(Aa, Ab; tol=tol)
+            if ok
+                push!(matched_pairs, (a,b))
+                push!(match_dicts, face_matches_to_dict(fa, fb, blocks[ia], blocks[ib]))
+            end
+        end
+    end
+
+    # Any face not participating in a match is considered an "outer face"
+    used = Set{Int}()
+    for (a,b) in matched_pairs
+        push!(used, a); push!(used, b)
+    end
+
+    outer_faces = Dict{String,Int}[]
+    for idx in 1:length(faces)
+        if !(idx in used)
+            _, _, f = faces[idx]
+            push!(outer_faces, Dict(
+                "block_index" => f.BlockIndex,
+                "IMIN" => f.IMIN, "JMIN" => f.JMIN, "KMIN" => f.KMIN,
+                "IMAX" => f.IMAX, "JMAX" => f.JMAX, "KMAX" => f.KMAX,
+                "id"   => f.id,
+            ))
+        end
+    end
+
+    return match_dicts, outer_faces
+end
+
+# -----------------------------------------------------------------------------
+# block_connection_matrix
+# -----------------------------------------------------------------------------
+"""
+    block_connection_matrix(blocks, all_faces_dicts) -> Matrix{Int8}
+
+Return an `n×n` symmetric adjacency matrix where `C[i,j]=1` if any face between
+block `i-1` and `j-1` was found to match (via `find_matching_blocks` here),
+else 0. Diagonal is set to 1.
+
+`all_faces_dicts` is accepted to mirror the Python signature, but this pragmatic
+implementation recomputes matches from `blocks` directly (fine for now).
+"""
+function block_connection_matrix(blocks::Vector{Block}, all_faces_dicts)::Matrix{Int8}
+    n = length(blocks)
+    C = fill(Int8(0), n, n)
+    for i in 1:n
+        C[i,i] = 1
+    end
+
+    matches = find_matching_blocks(blocks)
+    for m in matches
+        b1 = m["block1"]; b2 = m["block2"]
+        i = Int(b1["block_index"]) + 1
+        j = Int(b2["block_index"]) + 1
+        C[i,j] = 1
+        C[j,i] = 1
+    end
+    return C
 end

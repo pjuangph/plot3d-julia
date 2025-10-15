@@ -35,10 +35,9 @@ using .Block3D: Block
 
 # =============== # IO ==========================================
 export read_plot3D_ascii, read_blocks, read_plot3D_binary, read_xyz_ascii
-using .XYZReader:  read_xyz_ascii
 
-export write_plot3D
-using .WritePlot3D: write_plot3D
+using .ReadPlot3D: read_plot3D_ascii, read_blocks, read_plot3D_binary   # ← add this
+using .XYZReader:  read_xyz_ascii
 
 # =============== # Face core ===================================
 export Face, add_vertex, vertices_equals, index_equals, match_indices,
@@ -58,7 +57,7 @@ export reduce_blocks
 # (defined directly by include("connectivity.jl"))
 export FaceMatchSet, point_match, select_multi_dimensional,
        find_matching_blocks, combinations_of_nearest_blocks,
-       get_face_intersection
+       get_face_intersection, connectivity_fast, block_connection_matrix
 
 # =============== # Periodicity ================================
 export create_rotation_matrix, linear_real_transform,
