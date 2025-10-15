@@ -1,45 +1,56 @@
 module Utils
 
-# Small, generic helpers used across modules.
-# Keep explicit import style minimal here (no external deps).
+    # -----------------------------------------------------------------------------
+    # unique_pairs
+    # -----------------------------------------------------------------------------
+    """
+        unique_pairs(n::Integer)
 
-export unique_pairs, ensure3d
+        Iterator of unordered index pairs `(i, j)` with `1 ≤ i < j ≤ n`.
 
-"""
-    unique_pairs(pairs::Vector{<:Tuple{Int,Int}}) -> Vector{Tuple{Int,Int}}
+        Example
+        -------
+        ```julia
+        collect(unique_pairs(4))  # => [(1,2),(1,3),(1,4),(2,3),(2,4),(3,4)]
 
-Return a list of unique unordered pairs.  
-E.g. both `(3,7)` and `(7,3)` collapse to `(3,7)`, and duplicates are removed.
-"""
-function unique_pairs(pairs::Vector{<:Tuple{Int,Int}})
-    seen = Set{Tuple{Int,Int}}()
-    out  = Tuple{Int,Int}[]
-    for (a,b) in pairs
-        u = a <= b ? (a,b) : (b,a)
-        if !(u in seen)
-            push!(seen, u)
-            push!(out, u)
+        unique_pairs(n::Integer) = ((i,j) for i in 1:n for j in i+1:n)
+        
+        unique_pairs(ps::Vector{<:Tuple{Int,Int}}) -> Vector{Tuple{Int,Int}}
+        Deduplicate an existing list of index pairs as unordered pairs.
+        Ensures i < j for all returned pairs and removes duplicates.
+    """
+    function unique_pairs(ps::Vector{<:Tuple{Int,Int}})
+        s = Set{Tuple{Int,Int}}()
+        @inbounds for (i,j) in ps
+            i == j && continue
+            a,b = i < j ? (i,j) : (j,i)
+            push!(s, (a,b))
+        end
+        return collect(s)
+    end
+
+    """
+    -----------------------------------------------------------------------------
+    ensure3d
+    -----------------------------------------------------------------------------
+    ensure3d(A)
+    Normalize coordinate containers to a 3-component representation.
+    Accepted inputs
+    (X, Y, Z) where each is a 3D array (I×J×K) → returned as-is.
+    A::Array{T,3} with size (I, J, 3) → returned as-is.
+    A::Array{T,2} with size (N, 3) → reshaped to (1, N, 3).
+    Throws an ArgumentError otherwise.
+    """
+    function ensure3d(A)
+        if A isa Tuple && length(A) == 3
+            return A
+        elseif A isa AbstractArray{<:Real,3} && size(A,3) == 3
+            return A
+        elseif A isa AbstractArray{<:Real,2} && size(A,2) == 3
+            return reshape(A, 1, size(A,1), 3)
+        else
+            throw(ArgumentError("ensure3d: unsupported coordinate container (got $(summary(A)))"))
         end
     end
-    return out
-end
-
-"""
-    ensure3d(A::AbstractArray) -> Array
-
-Ensure array has 3 dimensions by adding a trailing singleton dimension if needed.
-- If `A` is 2D (IMAX×JMAX), returns a view with size (IMAX, JMAX, 1).
-- If `A` is 3D already, returns `A` as-is.
-"""
-function ensure3d(A::AbstractArray)
-    nd = ndims(A)
-    if nd == 3
-        return A
-    elseif nd == 2
-        return reshape(A, size(A,1), size(A,2), 1)
-    else
-        error("ensure3d: expected 2D or 3D array, got ndims=$(ndims(A))")
-    end
-end
 
 end # module

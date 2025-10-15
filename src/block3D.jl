@@ -2,48 +2,60 @@ module Block3D
 
 import Statistics: mean
 
-"""
-    struct Block
+export Block, recompute_centroid!
 
-Stores a 3D or 2D block of coordinates X, Y, Z with shape (IMAX, JMAX, KMAX).
-
-If `KMAX == 1`, this block is treated as 2D (Option A).
 """
-struct Block
-    X::Array{Float64,3}
-    Y::Array{Float64,3}
-    Z::Array{Float64,3}
+    Block(X, Y, Z)
+
+Structured Plot3D block storing node coordinates on a regular I×J×K grid.
+
+Fields
+------
+- `X, Y, Z :: Array{T,3}`  coordinate arrays (same size)
+- `IMAX, JMAX, KMAX :: Int` number of nodes along each axis
+- `cx, cy, cz :: Float64`   geometric centroid (mean of all nodes)
+
+Notes
+-----
+- `IMAX/JMAX/KMAX` are **node counts** (not cells).
+- Centroid is computed on construction; call `recompute_centroid!(b)` if you
+  mutate coordinates later and want to refresh `(cx,cy,cz)`.
+"""
+mutable struct Block{T<:Real}
+    X::Array{T,3}
+    Y::Array{T,3}
+    Z::Array{T,3}
     IMAX::Int
     JMAX::Int
     KMAX::Int
-    index::Int
+    cx::Float64
+    cy::Float64
+    cz::Float64
+
+    function Block(X::Array{T,3}, Y::Array{T,3}, Z::Array{T,3}) where {T<:Real}
+        size(X) == size(Y) == size(Z) || throw(ArgumentError("X, Y, Z must have identical sizes"))
+        I, J, K = size(X)
+        cx = mean(vec(X)); cy = mean(vec(Y)); cz = mean(vec(Z))
+        new{T}(X, Y, Z, I, J, K, cx, cy, cz)
+    end
 end
 
-"""
-    Block(X, Y, Z; index=0)
+# ----------------------------------------------------------------------
+# Convenience / utilities
+# ----------------------------------------------------------------------
+Base.size(b::Block) = size(b.X)
+Base.eltype(b::Block{T}) where {T} = T
 
-Construct a `Block` given coordinate arrays.  
-Automatically sets IMAX, JMAX, KMAX.
 """
-function Block(X::Array{Float64,3}, Y::Array{Float64,3}, Z::Array{Float64,3}; index::Int=0)
-    sizeX = size(X)
-    return Block(X, Y, Z, sizeX[1], sizeX[2], sizeX[3], index)
+    recompute_centroid!(b::Block)
+
+Recompute `(cx, cy, cz)` from the current coordinates.
+"""
+function recompute_centroid!(b::Block)
+    b.cx = mean(vec(b.X))
+    b.cy = mean(vec(b.Y))
+    b.cz = mean(vec(b.Z))
+    return b
 end
-
-"""
-    centroid(block::Block) -> NTuple{3,Float64}
-
-Return centroid (mean X, mean Y, mean Z) for the block.
-"""
-function centroid(b::Block)
-    return (mean(b.X), mean(b.Y), mean(b.Z))
-end
-
-"""
-    size_tuple(block::Block) -> NTuple{3,Int}
-
-Return (IMAX, JMAX, KMAX) for the block.
-"""
-size_tuple(b::Block) = (b.IMAX, b.JMAX, b.KMAX)
 
 end # module

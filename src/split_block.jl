@@ -1,135 +1,115 @@
+# split_block.jl — functions live directly in Plot3D
 
-# split_block.jl
-# (No external imports required; all Base)
+import Statistics: mean
+using .Block3D: Block
 
-# Simple Direction enum; avoid K in 2D (KMAX==1)
-@enum Direction::UInt8 begin
-    DirI = 0
-    DirJ = 1
-    DirK = 2
+# Simple enum-ish Direction
+struct Direction; axis::Symbol; end
+Direction_i() = Direction(:i)
+Direction_j() = Direction(:j)
+Direction_k() = Direction(:k)
+
+"""
+    max_aspect_ratio(X,Y,Z, ix,jx,kx)
+
+Estimate the maximum cell aspect ratio in a block by scanning local edge
+lengths around (ix,jx,kx) cell center. Indices are **1-based cell indices**
+(so valid ranges are 1:(IMAX-1), etc.). Returns a Float64.
+"""
+function max_aspect_ratio(X::AbstractArray{<:Real,3},
+                          Y::AbstractArray{<:Real,3},
+                          Z::AbstractArray{<:Real,3},
+                          ix::Int, jx::Int, kx::Int)
+    I,J,K = size(X)
+    1 ≤ ix < I || error("ix out of range"); 1 ≤ jx < J || error("jx out of range")
+    1 ≤ kx < K || error("kx out of range")
+    # cell corners
+    c = ((ix,jx,kx), (ix+1,jx,kx), (ix,jx+1,kx), (ix+1,jx+1,kx),
+         (ix,jx,kx+1), (ix+1,jx,kx+1), (ix,jx+1,kx+1), (ix+1,jx+1,kx+1))
+    pts = [(X[i,j,k], Y[i,j,k], Z[i,j,k]) for (i,j,k) in c]
+
+    # edges meeting at c[1]
+    e = []
+    push!(e, ((pts[2][1]-pts[1][1]), (pts[2][2]-pts[1][2]), (pts[2][3]-pts[1][3])))
+    push!(e, ((pts[3][1]-pts[1][1]), (pts[3][2]-pts[1][2]), (pts[3][3]-pts[1][3])))
+    push!(e, ((pts[5][1]-pts[1][1]), (pts[5][2]-pts[1][2]), (pts[5][3]-pts[1][3])))
+    lens = [sqrt(x*x+y*y+z*z) for (x,y,z) in e]
+    lmin = minimum(lens); lmax = maximum(lens)
+    return lmax > 0 ? lmax/lmin : Inf
 end
 
-# Internal step search (ported from Python)
-function _step_search(total_cells::Int, gcd_cells::Int, ncells_per_block::Int, denominator::Int; forward::Bool)
-    initial_guess = max(1, Int(cld(ncells_per_block, denominator)))
-    step_size = initial_guess
-    rem_cells = total_cells % (step_size * denominator)
-    ijkmax_rem = rem_cells ÷ denominator
-    inc = forward ? 1 : -1
+# choose axis by longest node count
+@inline _auto_axis(IMAX,JMAX,KMAX) = ((IMAX≥JMAX && IMAX≥KMAX) ? :i : (JMAX≥KMAX ? :j : :k))
 
-    while ((step_size % gcd_cells != 0) ||
-           ((ijkmax_rem - 1) % gcd_cells != 0)) &&
-          step_size > initial_guess ÷ 2 &&
-          step_size < Int(round(initial_guess * 1.5))
-        if (step_size % gcd_cells == 0) && ((ijkmax_rem - 1) % gcd_cells == 0)
-            break
-        end
-        step_size += inc
-        rem_cells = total_cells % (step_size * denominator)
-        ijkmax_rem = rem_cells ÷ denominator
+# split helper: cut index range 1:N into ~nparts chunks, try to keep gcd alignment
+function _split_indices(N::Int, nparts::Int, gcd_keep::Int)
+    nparts = max(1, min(N, nparts))
+    # target length per chunk in cells (N-1 is cells along that axis)
+    chunk = max(1, fld(N-1, nparts))
+    # adjust to be multiple of gcd_keep if possible
+    if gcd_keep > 1
+        m = max(1, round(Int, chunk / gcd_keep))
+        chunk = max(1, m*gcd_keep)
     end
-
-    if (step_size % gcd_cells != 0) || ((ijkmax_rem - 1) % gcd_cells != 0)
-        return -1
+    # emit splits
+    cuts = Int[1]
+    i = 1
+    while i+chunk ≤ N
+        i += chunk
+        push!(cuts, i)
     end
-    return step_size
+    if last(cuts) != N
+        push!(cuts, N)
+    end
+    return cuts
 end
 
 """
-    split_blocks(blocks, ncells_per_block; prefer::Union{Nothing,Direction}=nothing)
+    split_blocks(blocks, ncells_per_block; direction::Union{Nothing,Direction}=nothing)
 
-Split each block into sub-blocks targeting about `ncells_per_block` cells, along the
-dominant dimension unless `prefer` is specified. Honors the grid GCD so faces line up.
+Split each block along a single axis so that each child has about `ncells_per_block`
+cells, while preserving a greatest-common-denominator alignment.
 
-2D blocks are supported (KMAX==1): DirK is never chosen for those blocks.
+Returns a **new Vector{Block}**.
 """
-function split_blocks(blocks::Vector{Block}, ncells_per_block::Int; prefer::Union{Nothing,Direction}=nothing)
-    new_blocks = Block[]
-    for block in blocks
-        IMAX, JMAX, KMAX = block.IMAX, block.JMAX, block.KMAX
-        ci = max(1, IMAX - 1); cj = max(1, JMAX - 1); ck = max(1, KMAX - 1)
-        total_cells = ci * cj * ck
-        if total_cells <= ncells_per_block
-            push!(new_blocks, block); continue
-        end
+function split_blocks(blocks::Vector{Block},
+                      ncells_per_block::Int,
+                      direction::Union{Nothing,Direction}=nothing)
+    ncells_per_block > 0 || error("ncells_per_block must be > 0")
+    out = Block[]
+    for b in blocks
+        IMAX,JMAX,KMAX = size(b.X)
+        # total cells
+        cells = (IMAX-1)*(JMAX-1)*max(1,KMAX-1)
+        parts = max(1, ceil(Int, cells / ncells_per_block))
 
-        # choose split direction
-        lengths = [(DirI, ci), (DirJ, cj)]
-        (KMAX > 1) && push!(lengths, (DirK, ck))
-        direction_to_use = isnothing(prefer) ? (reduce((a,b)->a[2]≥b[2] ? a : b, lengths)[1]) : prefer
-
-        gcd_cells = gcd(IMAX-1, gcd(JMAX-1, max(1, KMAX-1)))
-
-        if direction_to_use == DirI
-            denom = JMAX * KMAX
-            ss = _step_search(total_cells, gcd_cells, ncells_per_block, denom; forward=false)
-            ss == -1 && (ss = _step_search(total_cells, gcd_cells, ncells_per_block, denom; forward=true))
-            ss == -1 && error("No valid step size found for I-splits.")
-
-            iprev = 1
-            i = ss
-            while i < IMAX
-                X = @view block.X[iprev:i+1, :, :]
-                Y = @view block.Y[iprev:i+1, :, :]
-                Z = @view block.Z[iprev:i+1, :, :]
-                push!(new_blocks, Block(X, Y, Z))
-                iprev = i + 1
-                i += ss
+        ax = isnothing(direction) ? _auto_axis(IMAX,JMAX,KMAX) : direction.axis
+        g   = gcd(IMAX-1, gcd(JMAX-1, KMAX-1))
+        if ax === :i
+            cuts = _split_indices(IMAX, parts, g)
+            for c in 1:length(cuts)-1
+                i1, i2 = cuts[c], cuts[c+1]
+                push!(out, Block(copy(b.X[i1:i2, :, :]),
+                                 copy(b.Y[i1:i2, :, :]),
+                                 copy(b.Z[i1:i2, :, :])))
             end
-            if iprev < IMAX
-                X = @view block.X[iprev:end, :, :]
-                Y = @view block.Y[iprev:end, :, :]
-                Z = @view block.Z[iprev:end, :, :]
-                push!(new_blocks, Block(X, Y, Z))
+        elseif ax === :j
+            cuts = _split_indices(JMAX, parts, g)
+            for c in 1:length(cuts)-1
+                j1, j2 = cuts[c], cuts[c+1]
+                push!(out, Block(copy(b.X[:, j1:j2, :]),
+                                 copy(b.Y[:, j1:j2, :]),
+                                 copy(b.Z[:, j1:j2, :])))
             end
-
-        elseif direction_to_use == DirJ
-            denom = IMAX * KMAX
-            ss = _step_search(total_cells, gcd_cells, ncells_per_block, denom; forward=false)
-            ss == -1 && (ss = _step_search(total_cells, gcd_cells, ncells_per_block, denom; forward=true))
-            ss == -1 && error("No valid step size found for J-splits.")
-
-            jprev = 1
-            j = ss
-            while j < JMAX
-                X = @view block.X[:, jprev:j+1, :]
-                Y = @view block.Y[:, jprev:j+1, :]
-                Z = @view block.Z[:, jprev:j+1, :]
-                push!(new_blocks, Block(X, Y, Z))
-                jprev = j + 1
-                j += ss
-            end
-            if jprev < JMAX
-                X = @view block.X[:, jprev:end, :]
-                Y = @view block.Y[:, jprev:end, :]
-                Z = @view block.Z[:, jprev:end, :]
-                push!(new_blocks, Block(X, Y, Z))
-            end
-
-        else # DirK
-            @assert KMAX > 1 "DirK chosen but this is a 2D block (KMAX==1)."
-            denom = IMAX * JMAX
-            ss = _step_search(total_cells, gcd_cells, ncells_per_block, denom; forward=false)
-            ss == -1 && (ss = _step_search(total_cells, gcd_cells, ncells_per_block, denom; forward=true))
-            ss == -1 && error("No valid step size found for K-splits.")
-
-            kprev = 1
-            k = ss
-            while k < KMAX
-                X = @view block.X[:, :, kprev:k+1]
-                Y = @view block.Y[:, :, kprev:k+1]
-                Z = @view block.Z[:, :, kprev:k+1]
-                push!(new_blocks, Block(X, Y, Z))
-                kprev = k + 1
-                k += ss
-            end
-            if kprev < KMAX
-                X = @view block.X[:, :, kprev:end]
-                Y = @view block.Y[:, :, kprev:end]
-                Z = @view block.Z[:, :, kprev:end]
-                push!(new_blocks, Block(X, Y, Z))
+        else
+            cuts = _split_indices(KMAX, parts, g)
+            for c in 1:length(cuts)-1
+                k1, k2 = cuts[c], cuts[c+1]
+                push!(out, Block(copy(b.X[:, :, k1:k2]),
+                                 copy(b.Y[:, :, k1:k2]),
+                                 copy(b.Z[:, :, k1:k2])))
             end
         end
     end
-    return new_blocks
+    return out
 end

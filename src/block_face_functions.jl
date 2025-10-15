@@ -1,13 +1,41 @@
-# facefunctions.jl — explicit imports, 2D-aware, optimized
+# block_face_functions.jl — merged Block+Face helpers (no circular imports)
 
 import LinearAlgebra: norm, dot
 import Statistics: mean
 
+# Core types we depend on
 import .Block3D: Block
 import .Face3D: Face, add_vertex, vertices_equals, index_equals, normal, match_indices, to_dict, set_block_index, set_face_id, is_edge
-import .BlockFunctions: reduce_blocks
 import .Utils: unique_pairs
 
+# =============================================================================
+# Block reduction (moved from BlockFunctions)
+# =============================================================================
+"""
+    reduce_blocks(blocks::Vector{Block}, stride::Integer)
+
+Downsample each block by taking every `stride` index in i, j, k (keeps endpoints).
+Returns a new vector of `Block`s with reduced resolution. `stride` must be ≥1.
+"""
+function reduce_blocks(blocks::Vector{Block}, stride::Integer)
+    stride ≥ 1 || throw(ArgumentError("stride must be ≥ 1 (got $stride)"))
+    out = Block[]
+    @inbounds for b in blocks
+        # make index ranges that always include the last index
+        is = unique!(sort!(vcat(1:stride:b.IMAX, b.IMAX)))
+        js = unique!(sort!(vcat(1:stride:b.JMAX, b.JMAX)))
+        ks = unique!(sort!(vcat(1:stride:max(b.KMAX,1), max(b.KMAX,1))))
+        Xr = b.X[is, js, ks]
+        Yr = b.Y[is, js, ks]
+        Zr = b.Z[is, js, ks]
+        push!(out, Block(Xr, Yr, Zr))
+    end
+    return out
+end
+
+# =============================================================================
+# Face functions (your current facefunctions.jl content, unchanged)
+# =============================================================================
 
 # -----------------------------------------------------------------------------
 # get_faces: dictionary of face slices by name

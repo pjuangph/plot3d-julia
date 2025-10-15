@@ -1,258 +1,256 @@
-# connectivity.jl — explicit imports, no DataFrames
+# connectivity.jl — lives directly in Plot3D (no module block)
 
 import LinearAlgebra: norm
 import Statistics: mean
 
 import .Block3D: Block
-import .Face3D: Face
-# Do NOT import a module named "facefunctions" — those functions are in this same Plot3D module.
-# Just call them directly, but ensure facefunctions.jl is included before this file.
-import .Utils: unique_pairs
-
+# Pull helpers that live directly in the Plot3D module (from facefunctions.jl include)
+import .Plot3D: faces_match, create_face_from_diagonals, face_matches_to_dict
 
 # -----------------------------------------------------------------------------
-# Small container for match results (no DataFrames)
+# Types
 # -----------------------------------------------------------------------------
+"""
+Light container for a set of face matches.
+
+Use `pairs` when you only need (block, face-name) tuples,
+or use the dicts returned by `find_matching_blocks` if you need index ranges.
+"""
 struct FaceMatchSet
-    i1::Vector{Int}; j1::Vector{Int}; k1::Vector{Int}
-    i2::Vector{Int}; j2::Vector{Int}; k2::Vector{Int}
-end
-FaceMatchSet() = FaceMatchSet(Int[], Int[], Int[], Int[], Int[], Int[])
-npoints(m::FaceMatchSet) = length(m.i1)
-isempty(m::FaceMatchSet) = npoints(m) == 0
-
-function push_match!(m::FaceMatchSet, i1::Int,j1::Int,k1::Int,i2::Int,j2::Int,k2::Int)
-    push!(m.i1, i1); push!(m.j1, j1); push!(m.k1, k1)
-    push!(m.i2, i2); push!(m.j2, j2); push!(m.k2, k2)
-    return m
-end
-
-function _mask!(m::FaceMatchSet, keep::Vector{Bool})
-    m.i1 = m.i1[keep]; m.j1 = m.j1[keep]; m.k1 = m.k1[keep]
-    m.i2 = m.i2[keep]; m.j2 = m.j2[keep]; m.k2 = m.k2[keep]
-    return m
+    pairs::Vector{Tuple{Tuple{Int,Symbol},Tuple{Int,Symbol}}}
 end
 
 # -----------------------------------------------------------------------------
-# point_match — search (i,j) location of closest X2,Y2,Z2 to (x,y,z)
+# Utilities
 # -----------------------------------------------------------------------------
-function point_match(x::Real, y::Real, z::Real,
-                     X2::AbstractMatrix, Y2::AbstractMatrix, Z2::AbstractMatrix; tol::Real=1e-6)
-    best = Inf; best_i = 0; best_j = 0
-    @inbounds for j in axes(X2, 2)
-        @simd for i in axes(X2, 1)
-            dx = x - X2[i, j]; dy = y - Y2[i, j]; dz = z - Z2[i, j]
-            d = sqrt(dx*dx + dy*dy + dz*dz)
-            if d < best
-                best = d; best_i = i; best_j = j
-            end
-        end
+"""
+    point_match(p::NTuple{3,Real}, q::NTuple{3,Real}; tol=1e-8)
+
+Approximate equality for 3D points.
+"""
+point_match(p::NTuple{3,Real}, q::NTuple{3,Real}; tol::Real=1e-8) =
+    isapprox(p[1], q[1]; atol=tol) &&
+    isapprox(p[2], q[2]; atol=tol) &&
+    isapprox(p[3], q[3]; atol=tol)
+
+"""
+    select_multi_dimensional(A, ir::UnitRange, jr::UnitRange, kr::UnitRange)
+
+Return a `@view` into a 3D array.
+"""
+select_multi_dimensional(A::AbstractArray, ir::UnitRange, jr::UnitRange, kr::UnitRange) = @view A[ir, jr, kr]
+
+# Small helper: centroid of a block. Uses b.cx/b.cy/b.cz if present; otherwise computes mean.
+function _block_centroid(b::Block)
+    try
+        return (getfield(b, :cx), getfield(b, :cy), getfield(b, :cz))
+    catch
+        return (mean(vec(b.X)), mean(vec(b.Y)), mean(vec(b.Z)))
     end
-    return best < tol ? (best_i - 1, best_j - 1) : (-1, -1)  # return 0-based like Python
 end
 
-# -----------------------------------------------------------------------------
-# select_multi_dimensional — slice a face (constant i or j or k)
-# inputs are 0-based (Python-style); views are 1-based
-# -----------------------------------------------------------------------------
-function select_multi_dimensional(T::AbstractArray,
-                                  dim1::Tuple{Int,Int},
-                                  dim2::Tuple{Int,Int},
-                                  dim3::Tuple{Int,Int})
-    i1,i2 = dim1; j1,j2 = dim2; k1,k2 = dim3
-    if i1 == i2
-        return @view T[i1+1, j1+1:j2+1, k1+1:k2+1]
-    elseif j1 == j2
-        return @view T[i1+1:i2+1, j1+1, k1+1:k2+1]
-    elseif k1 == k2
-        return @view T[i1+1:i2+1, j1+1:j2+1, k1+1]
+# Internal: get canonical 2D (X,Y,Z) face arrays by name
+# face_name: "imin"|"imax"|"jmin"|"jmax"|"kmin"|"kmax"
+function _get_face_arrays_named(b::Block, face_name::String)
+    if face_name === "imin"
+        return (view(b.X, 1, :, :),           view(b.Y, 1, :, :),           view(b.Z, 1, :, :))
+    elseif face_name === "imax"
+        return (view(b.X, b.IMAX, :, :),      view(b.Y, b.IMAX, :, :),      view(b.Z, b.IMAX, :, :))
+    elseif face_name === "jmin"
+        return (view(b.X, :, 1, :),           view(b.Y, :, 1, :),           view(b.Z, :, 1, :))
+    elseif face_name === "jmax"
+        return (view(b.X, :, b.JMAX, :),      view(b.Y, :, b.JMAX, :),      view(b.Z, :, b.JMAX, :))
+    elseif face_name === "kmin"
+        return (view(b.X, :, :, 1),           view(b.Y, :, :, 1),           view(b.Z, :, :, 1))
+    elseif face_name === "kmax"
+        return (view(b.X, :, :, b.KMAX),      view(b.Y, :, :, b.KMAX),      view(b.Z, :, :, b.KMAX))
     else
-        return @view T[i1+1:i2+1, j1+1:j2+1, k1+1:k2+1]
+        error("Unknown face name: $face_name")
     end
 end
 
-# -----------------------------------------------------------------------------
-# Edge check and increasing filters (ported logic, vectorized)
-# -----------------------------------------------------------------------------
-function __check_edge(m::FaceMatchSet)
-    imin = minimum(m.i1); jmin = minimum(m.j1); kmin = minimum(m.k1)
-    imax = maximum(m.i1); jmax = maximum(m.j1); kmax = maximum(m.k1)
-    edge_matches = 0
-    edge_matches += (imin == imax) ? 1 : 0
-    edge_matches += (jmin == jmax) ? 1 : 0
-    edge_matches += (kmin == kmax) ? 1 : 0
-    return edge_matches >= 2
-end
-
-function __filter_block_increasing!(m::FaceMatchSet, key::Symbol)
-    vals = unique(getfield(m, key))
-    sort!(vals)
-    if length(vals) <= 1
-        # This indicates a degenerate (edge-like) set on this axis; clear results
-        m.i1 = Int[]; m.j1 = Int[]; m.k1 = Int[]
-        m.i2 = Int[]; m.j2 = Int[]; m.k2 = Int[]
-        return m
+# Provide all canonical names a block actually has (skip k-faces if KMAX==1)
+function _all_face_names(b::Block)
+    names = String["imin","imax","jmin","jmax"]
+    if b.KMAX > 1
+        push!(names, "kmin"); push!(names, "kmax")
     end
-    keep_set = Set{Int}()
-    for idx in 1:length(vals)-1
-        if (vals[idx+1] - vals[idx]) == 1
-            push!(keep_set, vals[idx])
-        end
-    end
-    if (vals[end] - vals[end-1]) == 1
-        push!(keep_set, vals[end])
-    end
-    keep = [getfield(m, key)[t] in keep_set for t in eachindex(getfield(m,key))]
-    return _mask!(m, keep)
+    return names
 end
 
 # -----------------------------------------------------------------------------
-# get_face_intersection — core matching of two faces (from different blocks)
+# find_matching_blocks
 # -----------------------------------------------------------------------------
-function get_face_intersection(face1::Face, face2::Face, block1::Block, block2::Block; tol::Real=1e-6)
-    matches = FaceMatchSet()
-    split_faces1 = Face[]; split_faces2 = Face[]
+"""
+    find_matching_blocks(blocks; tol=1e-8)
 
-    I1 = (face1.IMIN, face1.IMAX); J1 = (face1.JMIN, face1.JMAX); K1 = (face1.KMIN, face1.KMAX)
-    I2 = (face2.IMIN, face2.IMAX); J2 = (face2.JMIN, face2.JMAX); K2 = (face2.KMIN, face2.KMAX)
+Find matching faces across all blocks by comparing canonical faces
+(`imin`, `imax`, `jmin`, `jmax`, `kmin`, `kmax` when present).
 
-    X1 = select_multi_dimensional(block1.X, I1, J1, K1)
-    Y1 = select_multi_dimensional(block1.Y, I1, J1, K1)
-    Z1 = select_multi_dimensional(block1.Z, I1, J1, K1)
+Returns a vector of **match dictionaries** compatible with your Python output,
+using the same schema as produced by `face_matches_to_dict`.
 
-    X2 = select_multi_dimensional(block2.X, I2, J2, K2)
-    Y2 = select_multi_dimensional(block2.Y, I2, J2, K2)
-    Z2 = select_multi_dimensional(block2.Z, I2, J2, K2)
+Each element looks like:
+Dict(
+    "block1" => Dict("block_index"=>i, "IMIN"=>..., "JMIN"=>..., "KMIN"=>..., "IMAX"=>..., "JMAX"=>..., "KMAX"=>..., "id"=>...),
+    "block2" => Dict( ... same keys ... )
+)
+The index ranges are filled so that lower/upper corners correspond between faces.
+"""
+function find_matching_blocks(blocks::Vector{Block}; tol::Real=1e-8)
+    n = length(blocks)
+    matches = Dict{String,Any}[]
 
-    if I1[1] == I1[2]           # Face 1 constant-i
-        @inbounds for p in axes(X1,1), q in axes(X1,2)
-            pm, qm = point_match(X1[p,q], Y1[p,q], Z1[p,q], X2, Y2, Z2; tol=tol)
-            if pm != -1
-                (I2[1]==I2[2]) && push_match!(matches, I1[1], (p-1)+J1[1], (q-1)+K1[1], I2[1], pm+J2[1], qm+K2[1])
-                (J2[1]==J2[2]) && push_match!(matches, I1[1], (p-1)+J1[1], (q-1)+K1[1], pm+I2[1], J2[1], qm+K2[1])
-                (K2[1]==K2[2]) && push_match!(matches, I1[1], (p-1)+J1[1], (q-1)+K1[1], pm+I2[1], qm+J2[1], K2[1])
-            end
-        end
+    # Precompute centroids for cheap pruning
+    cents = [_block_centroid(b) for b in blocks]
 
-    elseif J1[1] == J1[2]       # Face 1 constant-j
-        @inbounds for p in axes(X1,1), q in axes(X1,2)
-            pm, qm = point_match(X1[p,q], Y1[p,q], Z1[p,q], X2, Y2, Z2; tol=tol)
-            if pm != -1
-                (I2[1]==I2[2]) && push_match!(matches, (p-1)+I1[1], J1[1], (q-1)+K1[1], I2[1], pm+J2[1], qm+K2[1])
-                (J2[1]==J2[2]) && push_match!(matches, (p-1)+I1[1], J1[1], (q-1)+K1[1], pm+I2[1], J2[1], qm+K2[1])
-                (K2[1]==K2[2]) && push_match!(matches, (p-1)+I1[1], J1[1], (q-1)+K1[1], pm+I2[1], qm+J2[1], K2[1])
-            end
-        end
+    # Rough global scale for centroid threshold
+    xs = vcat([vec(b.X) for b in blocks]...)
+    ys = vcat([vec(b.Y) for b in blocks]...)
+    zs = vcat([vec(b.Z) for b in blocks]...)
+    bbox = (maximum(xs)-minimum(xs)) + (maximum(ys)-minimum(ys)) + (maximum(zs)-minimum(zs))
+    centroid_thresh = max(1e-12, 1e-6 * bbox)
 
-    elseif K1[1] == K1[2]       # Face 1 constant-k
-        @inbounds for p in axes(X1,1), q in axes(X1,2)
-            pm, qm = point_match(X1[p,q], Y1[p,q], Z1[p,q], X2, Y2, Z2; tol=tol)
-            if pm != -1
-                (I2[1]==I2[2]) && push_match!(matches, (p-1)+I1[1], (q-1)+J1[1], K1[1], I2[1], pm+J2[1], qm+K2[1])
-                (J2[1]==J2[2]) && push_match!(matches, (p-1)+I1[1], (q-1)+J1[1], K1[1], pm+I2[1], J2[1], qm+K2[1])
-                (K2[1]==K2[2]) && push_match!(matches, (p-1)+I1[1], (q-1)+J1[1], K1[1], pm+I2[1], qm+J2[1], K2[1])
-            end
-        end
-    end
+    face_names = [ _all_face_names(b) for b in blocks ]
 
-    # Final validation & optional splits
-    if npoints(matches) < 4 || __check_edge(matches)
-        return FaceMatchSet(), split_faces1, split_faces2
-    end
+    for i in 1:n
+        bi = blocks[i]
+        for j in i+1:n
+            bj = blocks[j]
 
-    # Filter-increasing (uniqueness)
-    if I1[1]==I1[2]; __filter_block_increasing!(matches, :j1); __filter_block_increasing!(matches, :k1); end
-    if J1[1]==J1[2]; __filter_block_increasing!(matches, :i1); __filter_block_increasing!(matches, :k1); end
-    if K1[1]==K1[2]; __filter_block_increasing!(matches, :i1); __filter_block_increasing!(matches, :j1); end
-    if I2[1]==I2[2]; __filter_block_increasing!(matches, :j2); __filter_block_increasing!(matches, :k2); end
-    if J2[1]==J2[2]; __filter_block_increasing!(matches, :i2); __filter_block_increasing!(matches, :k2); end
-    if K2[1]==K2[2]; __filter_block_increasing!(matches, :i2); __filter_block_increasing!(matches, :j2); end
+            # centroid gating
+            dx = cents[i][1]-cents[j][1]; dy = cents[i][2]-cents[j][2]; dz = cents[i][3]-cents[j][3]
+            dcent = sqrt(dx*dx + dy*dy + dz*dz)
+            dcent <= centroid_thresh || continue
 
-    if npoints(matches) < 4
-        return FaceMatchSet(), split_faces1, split_faces2
-    end
+            # try all face name pairs
+            for fi in face_names[i]
+                Ai = _get_face_arrays_named(bi, fi)
+                for fj in face_names[j]
+                    Aj = _get_face_arrays_named(bj, fj)
+                    ok, flips = faces_match(Ai, Aj; tol=tol)
+                    if ok
+                        # Build Face objects from full index spans to encode ranges in the dict.
+                        if fi === "imin"
+                            f1 = create_face_from_diagonals(bi, 0, 0, 0, 0, bi.JMAX-1, bi.KMAX-1)
+                        elseif fi === "imax"
+                            f1 = create_face_from_diagonals(bi, bi.IMAX-1, 0, 0, bi.IMAX-1, bi.JMAX-1, bi.KMAX-1)
+                        elseif fi === "jmin"
+                            f1 = create_face_from_diagonals(bi, 0, 0, 0, bi.IMAX-1, 0, bi.KMAX-1)
+                        elseif fi === "jmax"
+                            f1 = create_face_from_diagonals(bi, 0, bi.JMAX-1, 0, bi.IMAX-1, bi.JMAX-1, bi.KMAX-1)
+                        elseif fi === "kmin"
+                            f1 = create_face_from_diagonals(bi, 0, 0, 0, bi.IMAX-1, bi.JMAX-1, 0)
+                        else # "kmax"
+                            f1 = create_face_from_diagonals(bi, 0, 0, bi.KMAX-1, bi.IMAX-1, bi.JMAX-1, bi.KMAX-1)
+                        end
 
-    # Split faces if intersection defines a proper sub-face
-    main_face = create_face_from_diagonals(block1, I1[1], J1[1], K1[1], I1[2], J1[2], K1[2])
-    imin, jmin, kmin = minimum(matches.i1), minimum(matches.j1), minimum(matches.k1)
-    imax, jmax, kmax = maximum(matches.i1), maximum(matches.j1), maximum(matches.k1)
-    if Int(imin==imax) + Int(jmin==jmax) + Int(kmin==kmax) == 1
-        split_faces1 = split_face(main_face, block1, imin, jmin, kmin, imax, jmax, kmax)
-        for s in split_faces1; s.BlockIndex = face1.BlockIndex; end
-    end
+                        if fj === "imin"
+                            f2 = create_face_from_diagonals(bj, 0, 0, 0, 0, bj.JMAX-1, bj.KMAX-1)
+                        elseif fj === "imax"
+                            f2 = create_face_from_diagonals(bj, bj.IMAX-1, 0, 0, bj.IMAX-1, bj.JMAX-1, bj.KMAX-1)
+                        elseif fj === "jmin"
+                            f2 = create_face_from_diagonals(bj, 0, 0, 0, bj.IMAX-1, 0, bj.KMAX-1)
+                        elseif fj === "jmax"
+                            f2 = create_face_from_diagonals(bj, 0, bj.JMAX-1, 0, bj.IMAX-1, bj.JMAX-1, bj.KMAX-1)
+                        elseif fj === "kmin"
+                            f2 = create_face_from_diagonals(bj, 0, 0, 0, bj.IMAX-1, bj.JMAX-1, 0)
+                        else # "kmax"
+                            f2 = create_face_from_diagonals(bj, 0, 0, bj.KMAX-1, bj.IMAX-1, bj.JMAX-1, bj.KMAX-1)
+                        end
 
-    main_face2 = create_face_from_diagonals(block2, I2[1], J2[1], K2[1], I2[2], J2[2], K2[2])
-    imin2, jmin2, kmin2 = minimum(matches.i2), minimum(matches.j2), minimum(matches.k2)
-    imax2, jmax2, kmax2 = maximum(matches.i2), maximum(matches.j2), maximum(matches.k2)
-    if Int(imin2==imax2) + Int(jmin2==jmax2) + Int(kmin2==kmax2) == 1
-        split_faces2 = split_face(main_face2, block2, imin2, jmin2, kmin2, imax2, jmax2, kmax2)
-        for s in split_faces2; s.BlockIndex = face2.BlockIndex; end
-    end
-
-    return matches, split_faces1, split_faces2
-end
-
-# -----------------------------------------------------------------------------
-# find_matching_blocks — iteratively split & match outer faces
-# -----------------------------------------------------------------------------
-function find_matching_blocks(block1::Block,block2::Block,block1_outer::Vector{Face}, block2_outer::Vector{Face}, tol::Real=1e-6)
-    block_match_indices = Vector{FaceMatchSet}()
-    block1_split_faces = Face[]
-    block2_split_faces = Face[]
-
-    match = true
-    while match
-        match = false
-        local p_idx = 0; local q_idx = 0
-        for p in eachindex(block1_outer)
-            block1_face = block1_outer[p]
-            for q in eachindex(block2_outer)
-                block2_face = block2_outer[q]
-                df, split_faces1, split_faces2 = get_face_intersection(block1_face, block2_face, block1, block2; tol=tol)
-                if npoints(df) > 0
-                    push!(block_match_indices, df)
-                    append!(block1_split_faces, split_faces1)
-                    append!(block2_split_faces, split_faces2)
-                    match = true; p_idx = p; q_idx = q
-                    break
+                        set_block_index(f1, i-1); set_block_index(f2, j-1)
+                        push!(matches, face_matches_to_dict(f1, f2, bi, bj))
+                    end
                 end
             end
-            if match; break; end
-        end
-        if match
-            deleteat!(block1_outer, p_idx)
-            deleteat!(block2_outer, q_idx)
-            append!(block1_outer, block1_split_faces)
-            append!(block2_outer, block2_split_faces)
-            empty!(block1_split_faces)
-            empty!(block2_split_faces)
         end
     end
-    return block_match_indices, block1_outer, block2_outer
+
+    return matches
 end
 
 # -----------------------------------------------------------------------------
-# combinations_of_nearest_blocks — neighbor pairs by centroid distance
+# combinations_of_nearest_blocks
 # -----------------------------------------------------------------------------
+"""
+    combinations_of_nearest_blocks(blocks; nearest_nblocks=4)
+
+Heuristic block pairing by nearest **block centroids**.
+Returns a vector of unique `(i,j)` index pairs (1-based), with i < j.
+"""
 function combinations_of_nearest_blocks(blocks::Vector{Block}; nearest_nblocks::Int=4)
-    centroids = [(mean(b.X), mean(b.Y), mean(b.Z)) for b in blocks]
-    distance_matrix = fill(1.0e10, length(blocks), length(blocks))
-    @inbounds for i in 1:length(blocks), j in 1:length(blocks)
-        if i != j
-            dx = centroids[i][1]-centroids[j][1]
-            dy = centroids[i][2]-centroids[j][2]
-            dz = centroids[i][3]-centroids[j][3]
-            distance_matrix[i,j] = sqrt(dx*dx+dy*dy+dz*dz)
+    n = length(blocks)
+    if n ≤ 1
+        return Tuple{Int,Int}[]
+    end
+
+    cents = [_block_centroid(b) for b in blocks]
+    pairs = Set{Tuple{Int,Int}}()
+
+    for i in 1:n
+        dists = Vector{Tuple{Int,Float64}}()
+        ci = cents[i]
+        for j in 1:n
+            j == i && continue
+            cj = cents[j]
+            dx = ci[1]-cj[1]; dy = ci[2]-cj[2]; dz = ci[3]-cj[3]
+            push!(dists, (j, sqrt(dx*dx + dy*dy + dz*dz)))
+        end
+        sort!(dists, by = x->x[2])
+        m = min(nearest_nblocks, length(dists))
+        for k in 1:m
+            j = dists[k][1]
+            i < j ? push!(pairs, (i,j)) : push!(pairs, (j,i))
         end
     end
-    new_combos = Tuple{Int,Int}[]  # 0-based pairs to match the rest of the library
-    for i in 1:length(blocks)
-        idx = sortperm(view(distance_matrix, i, :))
-        for j in idx[1:min(nearest_nblocks, length(idx))]
-            if distance_matrix[i,j] < 1.0e10
-                push!(new_combos, (i-1, j-1))
-            end
+
+    return collect(pairs)
+end
+
+# -----------------------------------------------------------------------------
+# get_face_intersection
+# -----------------------------------------------------------------------------
+"""
+    get_face_intersection(face1::Face, face2::Face, block1::Block, block2::Block; tol=1e-8)
+
+Return a vector with **one** match dictionary describing how `face1` maps to `face2`
+(using the same schema as `face_matches_to_dict`). This **first pass** assumes the
+faces fully match (typical CFD abutting faces). If you need **partial overlaps**,
+we can extend this to compute tight index windows by projecting and scanning
+the shared parameter lines.
+
+Returns: `Vector{Dict{String,Any}}` with length 1 when matched, or `Vector{Dict{String,Any}}()` if not matched.
+"""
+function get_face_intersection(face1, face2, block1::Block, block2::Block; tol::Real=1e-8)
+    # Build the 2D arrays for each face to test a match (fast corner test with reversals)
+    function _arrays_from_face(b::Block, f)
+        # infer which axis is constant by comparing min==max of index ranges
+        if f.IMIN == f.IMAX
+            a = f.IMIN + 1
+            return (view(b.X, a, f.JMIN+1:f.JMAX+1, f.KMIN+1:f.KMAX+1),
+                    view(b.Y, a, f.JMIN+1:f.JMAX+1, f.KMIN+1:f.KMAX+1),
+                    view(b.Z, a, f.JMIN+1:f.JMAX+1, f.KMIN+1:f.KMAX+1))
+        elseif f.JMIN == f.JMAX
+            b0 = f.JMIN + 1
+            return (view(b.X, f.IMIN+1:f.IMAX+1, b0, f.KMIN+1:f.KMAX+1),
+                    view(b.Y, f.IMIN+1:f.IMAX+1, b0, f.KMIN+1:f.KMAX+1),
+                    view(b.Z, f.IMIN+1:f.IMAX+1, b0, f.KMIN+1:f.KMAX+1))
+        else
+            c = f.KMIN + 1
+            return (view(b.X, f.IMIN+1:f.IMAX+1, f.JMIN+1:f.JMAX+1, c),
+                    view(b.Y, f.IMIN+1:f.IMAX+1, f.JMIN+1:f.JMAX+1, c),
+                    view(b.Z, f.IMIN+1:f.IMAX+1, f.JMIN+1:f.JMAX+1, c))
         end
     end
-    return new_combos
+
+    A1 = _arrays_from_face(block1, face1)
+    A2 = _arrays_from_face(block2, face2)
+    ok, _ = faces_match(A1, A2; tol=tol)
+    if !ok
+        return Dict{String,Any}[]  # not intersecting (within tolerance)
+    end
+
+    # For full-face matches, a single dict maps the lower/upper corners.
+    return [face_matches_to_dict(face1, face2, block1, block2)]
 end
