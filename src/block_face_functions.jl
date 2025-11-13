@@ -23,7 +23,9 @@ export reduce_blocks,
        find_face_nearest_point,
        outer_face_dict_to_list,
        match_faces_dict_to_list,
-       face_matches_to_dict
+       face_matches_to_dict,
+       touches_by_nodes,
+       shared_point_fraction
 # =============================================================================
 # Block reduction (moved from BlockFunctions)
 # =============================================================================
@@ -129,53 +131,62 @@ end
 # get_outer_faces — single block
 # -----------------------------------------------------------------------------
 """
-    get_outer_faces(b::Block; block_index::Int=0) -> Vector{Face}
+    get_outer_faces(b::Block; block_index::Int=0)
+        -> (non_matching::Vector{Face}, matching::Vector{Tuple{Face,Face}})
 
-Return the 4/6 canonical boundary faces for a single block `b`
-(imin/imax, jmin/jmax, and kmin/kmax when `b.KMAX>1`).
-
-`block_index` is stored on each returned `Face` as **zero-based** to match
-the Python schema (default = 0).
+Return the outer faces of a block along with any self-matching face pairs
+(faces that coincide within the same block). Mirrors Python's behaviour.
 """
 function get_outer_faces(b::Block; block_index::Int=0)
-    out = Face[]
-    # imin
-    f = create_face_from_diagonals(b, 0, 0, 0, 0, b.JMAX-1, b.KMAX-1)
-    set_block_index(f, block_index); push!(out, f)
-    # imax
-    f = create_face_from_diagonals(b, b.IMAX-1, 0, 0, b.IMAX-1, b.JMAX-1, b.KMAX-1)
-    set_block_index(f, block_index); push!(out, f)
-    # jmin
-    f = create_face_from_diagonals(b, 0, 0, 0, b.IMAX-1, 0, b.KMAX-1)
-    set_block_index(f, block_index); push!(out, f)
-    # jmax
-    f = create_face_from_diagonals(b, 0, b.JMAX-1, 0, b.IMAX-1, b.JMAX-1, b.KMAX-1)
-    set_block_index(f, block_index); push!(out, f)
-    # k-planes (3D only)
+    faces = Face[]
+    push!(faces, create_face_from_diagonals(b, 0, 0, 0, 0, b.JMAX-1, b.KMAX-1))                 # imin
+    push!(faces, create_face_from_diagonals(b, b.IMAX-1, 0, 0, b.IMAX-1, b.JMAX-1, b.KMAX-1))   # imax
+    push!(faces, create_face_from_diagonals(b, 0, 0, 0, b.IMAX-1, 0, b.KMAX-1))                 # jmin
+    push!(faces, create_face_from_diagonals(b, 0, b.JMAX-1, 0, b.IMAX-1, b.JMAX-1, b.KMAX-1))   # jmax
     if b.KMAX > 1
-        f = create_face_from_diagonals(b, 0, 0, 0, b.IMAX-1, b.JMAX-1, 0)
-        set_block_index(f, block_index); push!(out, f)
-        f = create_face_from_diagonals(b, 0, 0, b.KMAX-1, b.IMAX-1, b.JMAX-1, b.KMAX-1)
-        set_block_index(f, block_index); push!(out, f)
+        push!(faces, create_face_from_diagonals(b, 0, 0, 0, b.IMAX-1, b.JMAX-1, 0))             # kmin
+        push!(faces, create_face_from_diagonals(b, 0, 0, b.KMAX-1, b.IMAX-1, b.JMAX-1, b.KMAX-1)) # kmax
     end
-    return out
+    for f in faces
+        set_block_index(f, block_index)
+    end
+
+    matching_pairs = Tuple{Int,Int}[]
+    non_matching = Face[]
+    for i in eachindex(faces)
+        match_found = false
+        for j in eachindex(faces)
+            i == j && continue
+            if vertices_equals(faces[i], faces[j])
+                push!(matching_pairs, (i, j))
+                match_found = true
+            end
+        end
+        if !match_found
+            push!(non_matching, faces[i])
+        end
+    end
+
+    uniq_pairs = unique_pairs(matching_pairs)
+    matching = [(faces[i], faces[j]) for (i, j) in uniq_pairs]
+    return non_matching, matching
 end
 
-# -----------------------------------------------------------------------------
-# get_outer_faces — vector of blocks (Python-style convenience)
-# -----------------------------------------------------------------------------
 """
-    get_outer_faces(blocks::Vector{Block}) -> Vector{Face}
+    get_outer_faces(blocks::Vector{Block})
+        -> (non_matching::Vector{Face}, matching::Vector{Tuple{Face,Face}})
 
-Return the canonical boundary faces for every block in `blocks`.
-Each `Face` gets its `BlockIndex` set to the block’s **zero-based** index.
+Return outer faces and self-matched face pairs for every block.
 """
 function get_outer_faces(blocks::Vector{Block})
-    out = Face[]
+    non_matching_all = Face[]
+    matching_all = Tuple{Face,Face}[]
     for (bi, b) in enumerate(blocks)
-        append!(out, get_outer_faces(b; block_index=bi-1))
+        outer, matching = get_outer_faces(b; block_index=bi-1)
+        append!(non_matching_all, outer)
+        append!(matching_all, matching)
     end
-    return out
+    return non_matching_all, matching_all
 end
 
 # -----------------------------------------------------------------------------
@@ -185,24 +196,26 @@ end
     get_outer_face_dicts(b::Block; block_index::Int=0) -> Vector{Dict{String,Int}}
 """
 function get_outer_face_dicts(b::Block; block_index::Int=0)
+    outer, _ = get_outer_faces(b; block_index=block_index)
     return [Dict(
         "block_index"=>f.BlockIndex,
         "IMIN"=>f.IMIN, "JMIN"=>f.JMIN, "KMIN"=>f.KMIN,
         "IMAX"=>f.IMAX, "JMAX"=>f.JMAX, "KMAX"=>f.KMAX,
         "id"=>f.id,
-    ) for f in get_outer_faces(b; block_index=block_index)]
+    ) for f in outer]
 end
 
 """
     get_outer_face_dicts(blocks::Vector{Block}) -> Vector{Dict{String,Int}}
 """
 function get_outer_face_dicts(blocks::Vector{Block})
+    outer, _ = get_outer_faces(blocks)
     return [Dict(
         "block_index"=>f.BlockIndex,
         "IMIN"=>f.IMIN, "JMIN"=>f.JMIN, "KMIN"=>f.KMIN,
         "IMAX"=>f.IMAX, "JMAX"=>f.JMAX, "KMAX"=>f.KMAX,
         "id"=>f.id,
-    ) for f in get_outer_faces(blocks)]
+    ) for f in outer]
 end
 # -----------------------------------------------------------------------------
 # create_face_from_diagonals
@@ -233,6 +246,287 @@ function create_face_from_diagonals(block::Block,
         end
     end
     return newFace
+end
+
+# -----------------------------------------------------------------------------
+# Face index/geometry helpers (parity with Python Face methods)
+# -----------------------------------------------------------------------------
+@inline function _face_const_type(f::Face)
+    if f.IMIN == f.IMAX
+        return 0  # I-constant
+    elseif f.JMIN == f.JMAX
+        return 1  # J-constant
+    elseif f.KMIN == f.KMAX
+        return 2  # K-constant
+    else
+        return -1
+    end
+end
+
+@inline function _face_index_ranges(f::Face)
+    return ((f.IMIN, f.IMAX), (f.JMIN, f.JMAX), (f.KMIN, f.KMAX))
+end
+
+function _face_axis_extreme(f::Face, axis::AbstractString)
+    axis_l = lowercase(axis)
+    if isempty(f.vertices)
+        return (0.0, 0.0)
+    end
+    xs = getfield.(f.vertices, Val(1))
+    ys = getfield.(f.vertices, Val(2))
+    zs = getfield.(f.vertices, Val(3))
+    if axis_l == "x"
+        return (minimum(xs), maximum(xs))
+    elseif axis_l == "y"
+        return (minimum(ys), maximum(ys))
+    elseif axis_l == "z"
+        return (minimum(zs), maximum(zs))
+    else
+        throw(ArgumentError("axis must be \"x\", \"y\", or \"z\" (got $axis)"))
+    end
+end
+
+function _global_axis_extreme(blocks::AbstractVector{<:Block}, axis::AbstractString)
+    axis_l = lowercase(axis)
+    mins = Float64[]; maxs = Float64[]
+    if axis_l == "x"
+        for b in blocks
+            push!(mins, minimum(b.X)); push!(maxs, maximum(b.X))
+        end
+    elseif axis_l == "y"
+        for b in blocks
+            push!(mins, minimum(b.Y)); push!(maxs, maximum(b.Y))
+        end
+    elseif axis_l == "z"
+        for b in blocks
+            push!(mins, minimum(b.Z)); push!(maxs, maximum(b.Z))
+        end
+    else
+        throw(ArgumentError("axis must be \"x\", \"y\", or \"z\" (got $axis)"))
+    end
+    return (minimum(mins), maximum(maxs))
+end
+
+function _face_grid_points(block::Block, f::Face; stride_u::Integer=1, stride_v::Integer=1)
+    const_type = _face_const_type(f)
+    if const_type == -1
+        # fall back to stored vertices (may be partial faces)
+        return [(v[1], v[2], v[3]) for v in f.vertices]
+    end
+
+    su = max(1, Int(stride_u))
+    sv = max(1, Int(stride_v))
+
+    points = NTuple{3,Float64}[]
+    (ir, jr, kr) = _face_index_ranges(f)
+
+    if const_type == 0
+        i = ir[1] + 1
+        for j in jr[1]:su:jr[2], k in kr[1]:sv:kr[2]
+            jj = j + 1; kk = k + 1
+            push!(points, (block.X[i, jj, kk], block.Y[i, jj, kk], block.Z[i, jj, kk]))
+        end
+    elseif const_type == 1
+        j = jr[1] + 1
+        for i in ir[1]:su:ir[2], k in kr[1]:sv:kr[2]
+            ii = i + 1; kk = k + 1
+            push!(points, (block.X[ii, j, kk], block.Y[ii, j, kk], block.Z[ii, j, kk]))
+        end
+    else
+        k = kr[1] + 1
+        for i in ir[1]:su:ir[2], j in jr[1]:sv:jr[2]
+            ii = i + 1; jj = j + 1
+            push!(points, (block.X[ii, jj, k], block.Y[ii, jj, k], block.Z[ii, jj, k]))
+        end
+    end
+    return points
+end
+
+@inline function _quantize_points(points::AbstractVector{<:NTuple{3,Float64}}, tol::Real)
+    s = tol > 0 ? float(tol) : 1e-12
+    return Set{NTuple{3,Int}}( (round(Int, p[1] / s), round(Int, p[2] / s), round(Int, p[3] / s)) for p in points )
+end
+
+function shared_point_fraction(
+    face1::Face, face2::Face,
+    block1::Block, block2::Block;
+    tol_xyz::Real = 1e-8,
+    stride_u::Integer = 1,
+    stride_v::Integer = 1,
+)
+    pts1 = _face_grid_points(block1, face1; stride_u=stride_u, stride_v=stride_v)
+    pts2 = _face_grid_points(block2, face2; stride_u=stride_u, stride_v=stride_v)
+    if isempty(pts1) || isempty(pts2)
+        return 0.0
+    end
+
+    Q1 = _quantize_points(pts1, tol_xyz)
+    Q2 = _quantize_points(pts2, tol_xyz)
+    if isempty(Q1) || isempty(Q2)
+        return 0.0
+    end
+
+    shared = 0
+    if length(Q1) ≤ length(Q2)
+        for p in Q1
+            shared += Int(p in Q2)
+        end
+    else
+        for p in Q2
+            shared += Int(p in Q1)
+        end
+    end
+    denom = min(length(Q1), length(Q2))
+    return denom > 0 ? shared / denom : 0.0
+end
+
+function touches_by_nodes(
+    face1::Face, face2::Face,
+    block1::Block, block2::Block;
+    tol_xyz::Real = 1e-8,
+    min_shared_frac::Real = 0.02,
+    min_shared_abs::Integer = 4,
+    stride_u::Integer = 1,
+    stride_v::Integer = 1,
+)
+    pts1 = _face_grid_points(block1, face1; stride_u=stride_u, stride_v=stride_v)
+    pts2 = _face_grid_points(block2, face2; stride_u=stride_u, stride_v=stride_v)
+    if isempty(pts1) || isempty(pts2)
+        return false
+    end
+
+    Q1 = _quantize_points(pts1, tol_xyz)
+    Q2 = _quantize_points(pts2, tol_xyz)
+    if isempty(Q1) || isempty(Q2)
+        return false
+    end
+
+    shared = 0
+    if length(Q1) ≤ length(Q2)
+        for p in Q1
+            shared += Int(p in Q2)
+        end
+    else
+        for p in Q2
+            shared += Int(p in Q1)
+        end
+    end
+    denom = min(length(Q1), length(Q2))
+    frac = denom > 0 ? shared / denom : 0.0
+    return (shared ≥ Int(min_shared_abs)) && (frac ≥ float(min_shared_frac))
+end
+
+function _select_seed_faces(
+    outer_faces::Vector{Face},
+    axis::AbstractString,
+    side::AbstractString,
+    plane::Float64,
+    tol_abs::Real,
+)
+    side_l = lowercase(side)
+    seeds = Face[]
+    for f in outer_faces
+        fmin, fmax = _face_axis_extreme(f, axis)
+        face_ext = side_l == "min" ? fmin : fmax
+        if abs(face_ext - plane) ≤ tol_abs
+            push!(seeds, f)
+        end
+    end
+    return seeds
+end
+
+function _bfs_collect_boundary(
+    seed_faces::Vector{Face},
+    all_outer_faces::Vector{Face},
+    blocks::Vector{Block},
+    axis::AbstractString,
+    side::AbstractString,
+    plane::Float64,
+    tol_abs::Real,
+    node_tol_xyz::Real,
+    min_shared_abs::Integer,
+    min_shared_frac::Real,
+)
+    side_l = lowercase(side)
+    function key(f::Face)
+        return (f.BlockIndex, f.IMIN, f.JMIN, f.KMIN, f.IMAX, f.JMAX, f.KMAX)
+    end
+
+    on_plane = Face[]
+    for f in all_outer_faces
+        fmin, fmax = _face_axis_extreme(f, axis)
+        v = side_l == "min" ? fmin : fmax
+        opp = side_l == "min" ? fmax : fmin
+        touch_plane = abs(v - plane) ≤ tol_abs
+        not_past = side_l == "min" ? (opp - plane ≤ tol_abs) : (plane - opp ≤ tol_abs)
+        if touch_plane && not_past
+            push!(on_plane, f)
+        end
+    end
+
+    pool = Dict{NTuple{7,Int},Face}()
+    for f in on_plane
+        pool[key(f)] = f
+    end
+
+    queue = Face[]
+    for f in seed_faces
+        k = key(f)
+        if haskey(pool, k)
+            push!(queue, pool[k])
+        end
+    end
+
+    visited = Set{NTuple{7,Int}}()
+    result = Face[]
+
+    while !isempty(queue)
+        cur = pop!(queue)
+        kcur = key(cur)
+        if kcur in visited
+            continue
+        end
+        push!(visited, kcur)
+        push!(result, cur)
+
+        bcur = blocks[cur.BlockIndex + 1]
+        for cand in values(pool)
+            k2 = key(cand)
+            if (k2 in visited) || k2 == kcur
+                continue
+            end
+            b2 = blocks[cand.BlockIndex + 1]
+            if touches_by_nodes(cur, cand, bcur, b2;
+                    tol_xyz=node_tol_xyz,
+                    min_shared_abs=min_shared_abs,
+                    min_shared_frac=min_shared_frac)
+                push!(queue, cand)
+            end
+        end
+    end
+
+    return result
+end
+
+function _rescale_faces(faces::Vector{Face}, gcd_to_use::Int)
+    uniq = Dict{NTuple{7,Int},Face}()
+    for f in faces
+        nf = deepcopy(f)
+        if gcd_to_use ≠ 1
+            nf.IMIN *= gcd_to_use; nf.IMAX *= gcd_to_use
+            nf.JMIN *= gcd_to_use; nf.JMAX *= gcd_to_use
+            nf.KMIN *= gcd_to_use; nf.KMAX *= gcd_to_use
+            nf.I *= gcd_to_use; nf.J *= gcd_to_use; nf.K *= gcd_to_use
+            nf.vertices = [(v[1], v[2], v[3],
+                            v[4] * gcd_to_use,
+                            v[5] * gcd_to_use,
+                            v[6] * gcd_to_use) for v in nf.vertices]
+        end
+        nf.BlockIndex = f.BlockIndex
+        nf.id = f.id
+        uniq[(nf.BlockIndex, nf.IMIN, nf.JMIN, nf.KMIN, nf.IMAX, nf.JMAX, nf.KMAX)] = nf
+    end
+    return collect(values(uniq))
 end
 
 # -----------------------------------------------------------------------------
@@ -345,85 +639,77 @@ end
 # find_bounding_faces
 # -----------------------------------------------------------------------------
 function find_bounding_faces(
-    blocks::Vector{Block},
-    connectivity_matrix::AbstractMatrix{<:Integer},
-    outer_faces::Vector{Dict{String,Int}} = Dict{String,Int}[];
+    blocks::AbstractVector{<:Block},
+    outer_faces::AbstractVector{<:AbstractDict} = Dict{String,Int}[];
     direction::AbstractString = "z",
+    side::AbstractString = "both",
+    tol_rel::Real = 1e-8,
+    node_tol_xyz::Real = 1e-6,
+    min_shared_abs::Integer = 2,
+    min_shared_frac::Real = 0.005,
 )
-    gcd_array = Int[]
-    @inbounds for b in blocks
-        push!(gcd_array, gcd(b.IMAX - 1, gcd(b.JMAX - 1, b.KMAX - 1)))
-    end
-    gcd_to_use = minimum(gcd_array)
-    blocks_red = reduce_blocks(deepcopy(blocks), gcd_to_use)
+    isempty(blocks) && return Dict{String,Int}[], Dict{String,Int}[], Face[], Face[]
 
-    xyz = [(b.cx, b.cy, b.cz) for b in blocks_red]
-    xs = [p[1] for p in xyz]; ys = [p[2] for p in xyz]; zs = [p[3] for p in xyz]
-    cx = mean(xs); cy = mean(ys); cz = mean(zs)
-    x, y, z = xs, ys, zs
+    axis = lowercase(direction)
+    axis in ("x", "y", "z") || throw(ArgumentError("direction must be \"x\", \"y\", or \"z\" (got $direction)"))
+    side_l = lowercase(side)
+    side_l in ("both", "min", "max") || throw(ArgumentError("side must be \"both\", \"min\", or \"max\" (got $side)"))
+
+    gcd_vals = Int[]
+    for b in blocks
+        push!(gcd_vals, gcd(b.IMAX - 1, gcd(b.JMAX - 1, b.KMAX - 1)))
+    end
+    gcd_to_use = max(1, minimum(gcd_vals))
+
+    blocks_copy = Block[]
+    for b in blocks
+        push!(blocks_copy, deepcopy(b))
+    end
+    blocks_red = reduce_blocks(blocks_copy, gcd_to_use)
 
     outer_faces_all::Vector{Face}
     if isempty(outer_faces)
         tmp = Face[]
-        for (i, b) in enumerate(blocks_red)
-            outer, _ = get_outer_faces(b)
-            for o in outer
-                set_block_index(o, i - 1)
-                push!(tmp, o)
-            end
+        for (bi, b) in enumerate(blocks_red)
+            outer_b, _ = get_outer_faces(b; block_index=bi-1)
+            append!(tmp, outer_b)
         end
         outer_faces_all = tmp
     else
         outer_faces_all = outer_face_dict_to_list(blocks_red, outer_faces, gcd_to_use)
     end
 
-    sel_idx_min, tx, ty, tz = find_closest_block(blocks_red, x, y, z, (cx, cy, cz); translational_direction=direction, minvalue=true)
-    faces_min = [f for f in outer_faces_all if f.BlockIndex == sel_idx_min]
-    @inbounds begin
-        mind = Inf; mini = 0
-        for (i,f) in enumerate(faces_min)
-            d = (f.cx - tx)^2 + (f.cy - ty)^2 + (f.cz - tz)^2
-            if d < mind; mind = d; mini = i; end
-        end
-        min_face = faces_min[mini]
+    gmin, gmax = _global_axis_extreme(blocks_red, axis)
+    tol_abs = max(1.0, abs(gmin) + abs(gmax)) * tol_rel
+
+    lower_faces_red = Face[]
+    upper_faces_red = Face[]
+
+    if side_l == "min" || side_l == "both"
+        seeds_min = _select_seed_faces(outer_faces_all, axis, "min", gmin, tol_abs)
+        lower_faces_red = _bfs_collect_boundary(
+            seeds_min, outer_faces_all, blocks_red,
+            axis, "min", gmin, tol_abs,
+            node_tol_xyz, min_shared_abs, min_shared_frac,
+        )
     end
 
-    sel_idx_max, tx, ty, tz = find_closest_block(blocks_red, x, y, z, (cx, cy, cz); translational_direction=direction, minvalue=false)
-    faces_max = [f for f in outer_faces_all if f.BlockIndex == sel_idx_max]
-    @inbounds begin
-        mind = Inf; mini = 0
-        for (i,f) in enumerate(faces_max)
-            d = (f.cx - tx)^2 + (f.cy - ty)^2 + (f.cz - tz)^2
-            if d < mind; mind = d; mini = i; end
-        end
-        max_face = faces_max[mini]
+    if side_l == "max" || side_l == "both"
+        seeds_max = _select_seed_faces(outer_faces_all, axis, "max", gmax, tol_abs)
+        upper_faces_red = _bfs_collect_boundary(
+            seeds_max, outer_faces_all, blocks_red,
+            axis, "max", gmax, tol_abs,
+            node_tol_xyz, min_shared_abs, min_shared_frac,
+        )
     end
 
-    conn = copy(connectivity_matrix)
-    @inbounds for i in 1:size(conn, 1); conn[i, i] = 0; end
+    lower_faces = _rescale_faces(lower_faces_red, gcd_to_use)
+    upper_faces = _rescale_faces(upper_faces_red, gcd_to_use)
 
-    outer_faces_all = [o for o in outer_faces_all if o.BlockIndex != min_face.BlockIndex]
-    outer_faces_all = [o for o in outer_faces_all if o.BlockIndex != max_face.BlockIndex]
+    lower_export = [to_dict(f) for f in lower_faces]
+    upper_export = [to_dict(f) for f in upper_faces]
 
-    lower_connected_faces = find_connected_faces(min_face, outer_faces_all, conn, blocks_red)
-    upper_connected_faces = find_connected_faces(max_face, outer_faces_all, conn, blocks_red)
-
-    push!(lower_connected_faces, min_face)
-    push!(upper_connected_faces, max_face)
-
-    lower_connected_faces = unique(lower_connected_faces)
-    upper_connected_faces = unique(upper_connected_faces)
-
-    @inbounds for l in lower_connected_faces
-        l.I *= gcd_to_use; l.J *= gcd_to_use; l.K *= gcd_to_use
-    end
-    @inbounds for u in upper_connected_faces
-        u.I *= gcd_to_use; u.J *= gcd_to_use; u.K *= gcd_to_use
-    end
-
-    lower_connected_faces_export = [to_dict(l) for l in lower_connected_faces]
-    upper_connected_faces_export = [to_dict(u) for u in upper_connected_faces]
-    return lower_connected_faces_export, upper_connected_faces_export, lower_connected_faces, upper_connected_faces
+    return lower_export, upper_export, lower_faces, upper_faces
 end
 
 # -----------------------------------------------------------------------------
@@ -477,7 +763,7 @@ end
 # -----------------------------------------------------------------------------
 # outer_face_dict_to_list / match_faces_dict_to_list
 # -----------------------------------------------------------------------------
-function outer_face_dict_to_list(blocks::Vector{Block}, outer_faces::Vector{Dict{String,Int}}, gcd::Int=1)
+function outer_face_dict_to_list(blocks::AbstractVector{<:Block}, outer_faces::AbstractVector{<:AbstractDict}, gcd::Int=1)
     out = Face[]
     @inbounds for o in outer_faces
         face = create_face_from_diagonals(
@@ -492,7 +778,7 @@ function outer_face_dict_to_list(blocks::Vector{Block}, outer_faces::Vector{Dict
     return out
 end
 
-function match_faces_dict_to_list(blocks::Vector{Block}, matched_faces::Vector{Dict{String,Any}}, gcd::Int=1)
+function match_faces_dict_to_list(blocks::AbstractVector{<:Block}, matched_faces::AbstractVector{<:AbstractDict}, gcd::Int=1)
     out = Face[]
     @inbounds for m in matched_faces
         b1 = m["block1"]; b2 = m["block2"]

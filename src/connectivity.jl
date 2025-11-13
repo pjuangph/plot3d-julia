@@ -5,8 +5,8 @@ module Connectivity
     import Statistics: mean
 
     # Pull helpers that live directly in the Plot3D module (from face algorithms)
-    using ..Block3D: Block, set_block_index
-    using ..Face3D: Face
+    using ..Block3D: Block
+    using ..Face3D: Face, set_block_index
     using ..Plot3D: faces_match, create_face_from_diagonals, face_matches_to_dict, 
         get_outer_face_dicts, outer_face_dict_to_list, match_faces_dict_to_list
 
@@ -308,7 +308,7 @@ module Connectivity
     `all_faces_dicts` is accepted to mirror the Python signature, but this pragmatic
     implementation recomputes matches from `blocks` directly (fine for now).
     """
-    function block_connection_matrix(blocks::Vector{Block}, _all_faces::Vector{Dict{String,Int}}; tol::Real=1e-8)
+    function block_connection_matrix(blocks::AbstractVector{<:Block}, _all_faces::AbstractVector{<:AbstractDict}; tol::Real=1e-8)
         nb = length(blocks)
         C  = fill(-1, nb, nb)
         for i in 1:nb

@@ -122,9 +122,9 @@ Slow but straightforward periodicity scan:
     periodic_faces_export, outer_faces_export, periodic_faces, outer_faces_all
 Where the *_export lists are dicts matching your Python schema.
 """
-function periodicity(blocks::Vector{Block},
-                     outer_faces::Vector{Dict{String,Int}},
-                     matched_faces::Vector{Dict{String,Any}};
+function periodicity(blocks::AbstractVector{<:Block},
+                     outer_faces::AbstractVector{<:AbstractDict},
+                     matched_faces::AbstractVector{<:AbstractDict};
                      periodic_direction::AbstractString="k",
                      rotation_axis::AbstractString="x",
                      nblades::Integer=55,
@@ -236,9 +236,9 @@ end
 Same return signature as `periodicity`, but first down-samples the mesh by the
 minimum gcd across blocks for speed (then maps indices back).
 """
-function periodicity_fast(blocks::Vector{Block},
-                          outer_faces::Vector{Dict{String,Int}},
-                          matched_faces::Vector{Dict{String,Any}};
+function periodicity_fast(blocks::AbstractVector{<:Block},
+                          outer_faces::AbstractVector{<:AbstractDict},
+                          matched_faces::AbstractVector{<:AbstractDict};
                           periodic_direction::AbstractString="k",
                           rotation_axis::AbstractString="x",
                           nblades::Integer=55,
@@ -273,9 +273,9 @@ end
 Rotate a copy of the geometry by `rotation_angle` (degrees) around the given axis.
 Return same tuple as `periodicity`.
 """
-function rotated_periodicity(blocks::Vector{Block},
-                             matched_faces::Vector{Dict{String,Any}},
-                             outer_faces::Vector{Dict{String,Int}};
+function rotated_periodicity(blocks::AbstractVector{<:Block},
+                             matched_faces::AbstractVector{<:AbstractDict},
+                             outer_faces::AbstractVector{<:AbstractDict};
                              rotation_angle::Real,
                              rotation_axis::AbstractString="x",
                              ReduceMesh::Bool=true,
@@ -388,8 +388,8 @@ end
     `stride_v`, `min_shared_frac`, and `min_shared_abs` keywords (align with your existing signature).
 """
 function translational_periodicity(
-    blocks::Vector{Block},
-    outer_faces::Vector{Dict{String,Int}};
+    blocks::AbstractVector{<:Block},
+    outer_faces::AbstractVector{<:AbstractDict};
     delta::Union{Nothing,Real}=nothing,
     translational_direction::AbstractString="z",
     node_tol_xyz::Union{Nothing,Real}=nothing,

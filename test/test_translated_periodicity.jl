@@ -9,8 +9,10 @@ using Printf
 # This file lives in test/manual/, so src is two levels up.
 SRC_DIR  = normpath(joinpath(@__DIR__, "..", "src"))
 include(joinpath(SRC_DIR, "plot3d.jl"))
-using .Plot3D: read_plot3D_binary, connectivity_fast, Block, match_faces_dict_to_list, outer_face_dict_to_list
-
+using .Plot3D: read_plot3D_binary, connectivity_fast, 
+                Block, match_faces_dict_to_list, outer_face_dict_to_list,
+                face_matches_to_dict, to_dict,
+                block_connection_matrix, translational_periodicity
 # --- download helper ----------------------------------------------------------
 function ensure_download(url::AbstractString, dest::AbstractString; force::Bool=false)
     if force || !isfile(dest)
